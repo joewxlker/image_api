@@ -1,0 +1,26 @@
+[package]
+name = "platform"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rocket = { version = "0.5.1", features = ["json"]}
+tokio = "1.50.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+thiserror = "2.0.18"
+filetime = "0.2.27"
+temp-dir = "0.2.0"
+log = "0.4.29"
+validator = { version = "0.20", features = ["derive"] }
+bon = "3.9.1"
+regex = "1.12.3"
+tracing = "0.1.44"
+jpeg-encoder = "0.7.0"
+serde_json = "1.0.149"
+serde = "1.0.228"
+rand = "0.10.0"
+mmap-sync = "2.0.1"
+rkyv = "0.7.40"
+bytecheck = { version = "~0.6.8", default-features = false }
+tower = "0.5.3"
+tracing-subscriber = { version = "0.3.23", features = ["std", "env-filter", "ansi"] }
