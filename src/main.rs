@@ -1,7 +1,6 @@
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 
-use rocket::Config;
 use tokio::select;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
@@ -55,21 +54,16 @@ async fn main() {
         .unwrap();
 
     let filter = EnvFilter::from_default_env()
-        .add_directive(LevelFilter::WARN.into())
+        .add_directive(LevelFilter::DEBUG.into())
         .add_directive("platform::services::image_service=debug".parse().unwrap());
 
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
         .with_env_filter(filter)
         .with_writer(log_file)
         .compact()
         .init();
 
     let server = rocket::Rocket::build()
-        .configure(Config {
-            log_level: rocket::config::LogLevel::Off,
-            ..Default::default()
-        })
         .attach(CORS)
         .manage(image_client)
         .manage(image_cache)
