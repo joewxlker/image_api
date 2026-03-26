@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+
 use rocket::Config;
 use tokio::select;
 use tracing::level_filters::LevelFilter;
@@ -40,8 +42,15 @@ impl Fairing for CORS {
 
 #[rocket::main]
 async fn main() {
-    let image_cache = MmapImageCache::new("./cache/images");
+    let project_dir = std::env::var("PROJECT_ROOT").unwrap();
+    let image_cache = MmapImageCache::new(&format!("{project_dir}/cache/images"));
     let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
+
+    let log_file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&format!("{project_dir}/logs/all.log"))
+        .unwrap();
 
     let filter = EnvFilter::from_default_env()
         .add_directive(LevelFilter::WARN.into())
@@ -50,6 +59,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
         .with_env_filter(filter)
+        .with_writer(log_file)
         .compact()
         .init();
 
