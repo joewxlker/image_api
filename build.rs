@@ -9,7 +9,7 @@ fn main() {
     std::fs::create_dir_all(project_root.join("cache/images")).unwrap();
     std::fs::create_dir_all(project_root.join("logs")).unwrap();
 
-    println!("cargo:rustc-env=MY_VAR=hello_from_build_rs");
+    println!("cargo:rustc-env=PROJECT_ROOT={:?}", project_root);
 
     println!("cargo:rerun-if-changed=build.rs");
 }
