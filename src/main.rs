@@ -40,9 +40,11 @@ impl Fairing for CORS {
     }
 }
 
+const PROJECT_ROOT: &str = env!("PROJECT_ROOT");
+
 #[rocket::main]
 async fn main() {
-    let project_root = PathBuf::from(std::env::var("PROJECT_ROOT").expect("Missing PROJECT_ROOT env var"));
+    let project_root = PathBuf::from(PROJECT_ROOT);
     let image_cache = MmapImageCache::new(project_root.join("cache/images"));
     let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
     let log_file_path = project_root.join("logs/all.log");
