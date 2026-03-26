@@ -56,7 +56,7 @@ async fn main() {
         .expect(&format!("{:?}", log_file_path));
 
     let filter = EnvFilter::from_default_env()
-        .add_directive(LevelFilter::DEBUG.into())
+        .add_directive(LevelFilter::WARN.into())
         .add_directive("platform::services::image_service=debug".parse().unwrap());
 
     tracing_subscriber::fmt()
