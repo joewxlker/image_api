@@ -1,4 +1,5 @@
 use std::fs::OpenOptions;
+use std::path::PathBuf;
 
 use rocket::Config;
 use tokio::select;
@@ -42,14 +43,15 @@ impl Fairing for CORS {
 
 #[rocket::main]
 async fn main() {
-    let project_dir = std::env::var("PROJECT_ROOT").unwrap();
-    let image_cache = MmapImageCache::new(&format!("{project_dir}/cache/images"));
+    let project_root = PathBuf::from(std::env::var("PROJECT_ROOT").expect("Missing PROJECT_ROOT env var"));
+    let image_cache = MmapImageCache::new(project_root.join("/cache/images"));
     let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
+    let log_file_path = project_root.join("/logs/all.log");
 
     let log_file = OpenOptions::new()
         .append(true)
         .create(true)
-        .open(&format!("{project_dir}/logs/all.log"))
+        .open(&log_file_path)
         .unwrap();
 
     let filter = EnvFilter::from_default_env()
@@ -73,6 +75,9 @@ async fn main() {
         .manage(image_cache)
         .mount("/api/images", images::images_routes())
         .launch();
+
+    tracing::debug!("PROJECT_ROOT: {:?}", project_root);
+    tracing::info!("Logging all outputs to: {:?}", log_file_path);
 
     select! {
         rocket = server => {

@@ -65,9 +65,9 @@ pub struct MmapImageCache {
 }
 
 impl MmapImageCache {
-    pub fn new(path: &str) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self {
-            path: PathBuf::from(path),
+            path,
         }
     }
 }
