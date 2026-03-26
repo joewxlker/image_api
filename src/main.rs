@@ -43,15 +43,15 @@ impl Fairing for CORS {
 #[rocket::main]
 async fn main() {
     let project_root = PathBuf::from(std::env::var("PROJECT_ROOT").expect("Missing PROJECT_ROOT env var"));
-    let image_cache = MmapImageCache::new(project_root.join("/cache/images"));
+    let image_cache = MmapImageCache::new(project_root.join("cache/images"));
     let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
-    let log_file_path = project_root.join("/logs/all.log");
+    let log_file_path = project_root.join("logs/all.log");
 
     let log_file = OpenOptions::new()
         .append(true)
         .create(true)
         .open(&log_file_path)
-        .unwrap();
+        .expect(&format!("{:?}", log_file_path));
 
     let filter = EnvFilter::from_default_env()
         .add_directive(LevelFilter::DEBUG.into())
