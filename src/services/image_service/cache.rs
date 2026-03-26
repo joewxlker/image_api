@@ -66,6 +66,8 @@ pub struct MmapImageCache {
 
 impl MmapImageCache {
     pub fn new(path: PathBuf) -> Self {
+        assert!(path.exists(), "Path {:?} required by MmapImageCache does not exist", path);
+
         Self {
             path,
         }
