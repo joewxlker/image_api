@@ -66,11 +66,21 @@ pub struct MmapImageCache {
 
 impl MmapImageCache {
     pub fn new(path: PathBuf) -> Self {
-        assert!(path.exists(), "Path {:?} required by MmapImageCache does not exist", path);
+        assert!(
+            path.exists(),
+            "Path {:?} required by MmapImageCache does not exist",
+            path
+        );
 
-        Self {
-            path,
-        }
+        Self { path }
+    }
+    pub fn from_env() -> Self {
+        dotenv::dotenv().ok();
+        let path = std::env::var("IMAGE_CACHE_PATH").expect(&format!(
+            "Missing env var IMAGE_CACHE_PATH required for MmapImageCache"
+        ));
+
+        Self::new(PathBuf::from(path))
     }
 }
 
@@ -82,12 +92,12 @@ pub struct TimedReadResult<T> {
     grace_period: Duration,
 }
 
-impl <T> TimedReadResult<T> {
+impl<T> TimedReadResult<T> {
     pub fn new(inner: T) -> Self {
         Self {
             inner,
             started_at: Instant::now(),
-            grace_period: GRACE_PERIOD
+            grace_period: GRACE_PERIOD,
         }
     }
 }
@@ -132,7 +142,7 @@ impl MmapImageCache {
 
         let archive = match self.read_archived_image(&mut synchronizer, &key).await? {
             Some(r) => r,
-            None => return Ok(None)
+            None => return Ok(None),
         };
 
         let mut bytes = vec![];
@@ -210,7 +220,7 @@ pub enum MmapImageCacheError {
     #[error("Unhandled IO Error: {0}")]
     UnhandledIoError(#[from] std::io::Error),
     #[error("SynchronizerError: {0}")]
-    SynchronizerError(#[from] SynchronizerError)
+    SynchronizerError(#[from] SynchronizerError),
 }
 
 #[derive(Clone)]
