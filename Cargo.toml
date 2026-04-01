@@ -25,3 +25,4 @@ bytecheck = { version = "~0.6.8", default-features = false }
 tower = "0.5.3"
 tracing-subscriber = { version = "0.3.23", features = ["std", "env-filter", "ansi"] }
 dotenv = "0.15.0"
+figment = { version = "0.10.19", features = ["json"] }

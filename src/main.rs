@@ -1,3 +1,5 @@
+use figment::Figment;
+use figment::providers::{Format, Json, Toml};
 use tokio::select;
 
 use crate::routes::images;
@@ -36,8 +38,30 @@ impl Fairing for CORS {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct Package {
+    name: String,
+    version: String
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct Config {
+    package: Package,
+    otlp_instance_id: String,
+    otlp_environment: String,
+    otlp_pendpoint: String,
+    log_directory: String,
+    cache_directory: String,
+}
+
 #[rocket::main]
 async fn main() {
+    let _: Config = Figment::new()
+        .merge(Toml::file("Cargo.toml"))
+        .join(Json::file("app.json"))
+        .extract()
+        .unwrap();
+
     let _ = Logger::from_env();
     let image_cache = MmapImageCache::from_env();
     let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
