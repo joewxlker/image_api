@@ -1,5 +1,13 @@
-use std::{pin::Pin, task::Poll, time::Instant};
+use std::{
+    pin::Pin,
+    task::Poll,
+    time::{Duration, Instant},
+};
 
+use opentelemetry::{
+    KeyValue, global,
+    metrics::{Counter, Histogram},
+};
 use tower::Service;
 use tracing::instrument;
 
@@ -10,32 +18,107 @@ use crate::services::image_service::{
 };
 
 #[derive(Clone, Debug)]
-pub struct ImageMetrics;
+pub struct ImageMetrics {
+    success_counter: Counter<u64>,
+    error_counter: Counter<u64>,
+    success_time: Histogram<f64>,
+    image_size: Histogram<f64>,
+    cache_hit_time: Histogram<f64>,
+    cache_miss_time: Histogram<f64>,
+    error_time: Histogram<f64>,
+    cache_hit_counter: Counter<u64>,
+    cache_miss_counter: Counter<u64>,
+}
 
 impl ImageMetrics {
+    pub fn new() -> Self {
+        let meter = global::meter("image_api");
+
+        Self {
+            success_counter: meter.u64_counter("image_service.success").build(),
+            error_counter: meter.u64_counter("image_service.error").build(),
+
+            success_time: meter
+                .f64_histogram("image_service.success_time")
+                .with_unit("s")
+                .with_description("Time taken for successful image processing")
+                .build(),
+
+            image_size: meter
+                .f64_histogram("image_service.image_size")
+                .with_unit("bytes")
+                .with_description("Size of generated/served image in bytes")
+                .build(),
+
+            cache_hit_time: meter
+                .f64_histogram("image_service.cache_hit_time")
+                .with_unit("s")
+                .build(),
+
+            cache_miss_time: meter
+                .f64_histogram("image_service.cache_miss_time")
+                .with_unit("s")
+                .build(),
+
+            error_time: meter
+                .f64_histogram("image_service.error_time")
+                .with_unit("s")
+                .build(),
+
+            cache_hit_counter: meter.u64_counter("image_service.cache_hit").build(),
+            cache_miss_counter: meter.u64_counter("image_service.cache_miss").build(),
+        }
+    }
+
     #[instrument(skip(result, start, self))]
-    fn success(
+    pub fn success(
         &self,
         start: &Instant,
         req: ImageGenerationParams,
         key: &str,
         result: &ImageCacheServiceResult,
     ) {
+        let duration = start.elapsed().as_secs_f64();
+
+        self.success_counter.add(1, &[]);
+        self.success_time.record(duration, &[]);
+        self.image_size.record(result.image_size() as f64, &[]);
+
         if result.is_cached() {
+            self.cache_hit_time.record(duration, &[]);
+            self.cache_hit_counter.add(1, &[]);
+            if start.elapsed() > Duration::from_millis(500) {
+                tracing::warn!(
+                    duration_ms = start.elapsed().as_millis(),
+                    threshold_ms = 500,
+                    "Slow cache hit: took longer than 500 ms"
+                );
+            }
             tracing::debug!("Loaded image from cache in {:?}", start.elapsed());
         } else {
+            self.cache_miss_time
+                .record(duration, &[KeyValue::new("key", key.to_string())]);
+            self.cache_miss_counter.add(1, &[]);
             tracing::debug!("Generated image in {:?}", start.elapsed());
         }
     }
+
     #[instrument(skip(err, start, self))]
-    fn error(
+    pub fn error(
         &self,
         start: &Instant,
         req: ImageGenerationParams,
         key: &str,
         err: &ImageClientError,
     ) {
-        tracing::error!("{err} occured in {:?}", start.elapsed());
+        let duration = start.elapsed().as_secs_f64();
+
+        self.error_counter
+            .add(1, &[KeyValue::new("key", key.to_string())]);
+
+        self.error_time.record(duration, &[]);
+
+        tracing::error!("{err} occurred in {:?}", start.elapsed());
     }
 }
 

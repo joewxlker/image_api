@@ -1,21 +1,23 @@
-use std::fs::OpenOptions;
-use std::path::PathBuf;
-
-use figment::Figment;
-use figment::providers::{Format, Json, Toml};
 use tokio::select;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
+use crate::middleware::metrics::RequestMetricsFairing;
 use crate::routes::images;
 use crate::services::image_service::cache::MmapImageCache;
 use crate::services::image_service::client::ImageClient;
 use crate::services::image_service::r#gen::ImageGenerator;
 use crate::services::image_service::metrics::ImageMetrics;
 
+mod middleware;
 mod routes;
 mod services;
+
+use opentelemetry::{KeyValue, global};
+use opentelemetry_otlp::{MetricExporter, Protocol, WithExportConfig};
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
@@ -43,24 +45,10 @@ impl Fairing for CORS {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct Package {
-    name: String,
-    version: String
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct Config {
-    package: Package,
-    otlp_instance_id: String,
-    otlp_environment: String,
-    otlp_pendpoint: Url,
-    log_directory: PathBuf,
-    cache_directory: PathBuf,
-}
-
 #[rocket::main]
 async fn main() {
+    dotenv::dotenv().ok();
+
     let config: Config = Figment::new()
         .merge(Toml::file("Cargo.toml"))
         .join(Json::file("app.json"))
@@ -84,11 +72,43 @@ async fn main() {
         .compact()
         .init();
 
+
+    // Metrics
+    let exporter = MetricExporter::builder()
+        .with_http()
+        .with_protocol(Protocol::HttpJson)
+        .with_endpoint("http://localhost:4318/v1/metrics")
+        .build()
+        .expect("Failed to create OTLP metrics exporter");
+
+    let reader = PeriodicReader::builder(exporter).build();
+    let resource = Resource::builder()
+        .with_attributes([
+            KeyValue::new("service.name", "image-api"),
+            KeyValue::new("service.version", "0.1.0"),
+            KeyValue::new("service.instance.id", "home"),
+            KeyValue::new("environment", "development"),
+        ])
+        .build();
+
+    let provider = SdkMeterProvider::builder()
+        .with_resource(resource)
+        .with_reader(reader)
+        .build();
+
+    global::set_meter_provider(provider);
+
+    // Rocket
     let image_cache = MmapImageCache::from_env();
-    let image_client = ImageClient::new(ImageGenerator::new(), image_cache.clone(), ImageMetrics);
+    let image_client = ImageClient::new(
+        ImageGenerator::new(),
+        image_cache.clone(),
+        ImageMetrics::new(),
+    );
 
     let server = rocket::Rocket::build()
         .attach(CORS)
+        .attach(RequestMetricsFairing::new())
         .manage(image_client)
         .manage(image_cache)
         .mount("/api/images", images::images_routes())

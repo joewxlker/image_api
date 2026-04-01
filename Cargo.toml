@@ -25,6 +25,10 @@ bytecheck = { version = "~0.6.8", default-features = false }
 tower = "0.5.3"
 tracing-subscriber = { version = "0.3.23", features = ["std", "env-filter", "ansi"] }
 dotenv = "0.15.0"
-figment = { version = "0.10.19", features = ["json"] }
-url = { version = "2", features = ["serde"] }
 metrics = "0.24.3"
+metrics-exporter-otel = "0.3.0"
+opentelemetry_sdk = "0.31.0"
+opentelemetry = "0.31.0"
+opentelemetry-otlp = { version = "0.31", features = ["http-json", "metrics"] }
+uuid = { version = "1.23.0", features = ["v4"] }
+figment = { version = "0.10.19", features = ["json"] }

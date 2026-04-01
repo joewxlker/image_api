@@ -254,6 +254,12 @@ impl ImageCacheServiceResult {
             Self::Generated(bytes) => bytes,
         }
     }
+    pub fn image_size(&self) -> u32 {
+        match self {
+            Self::Cached(bytes) => bytes.len() as u32,
+            Self::Generated(bytes) => bytes.len() as u32,
+        }
+    }
 }
 
 impl Service<ImageGenerationParams> for ImageCacheService {
