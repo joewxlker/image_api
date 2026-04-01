@@ -1,3 +1,9 @@
+use std::fs::OpenOptions;
+use std::path::PathBuf;
+
+use figment::Figment;
+use figment::providers::{Format, Toml};
+use serde::{Deserialize, Serialize};
 use tokio::select;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
@@ -45,16 +51,40 @@ impl Fairing for CORS {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct Package {
+    name: String,
+    version: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OTLP {
+    instance_id: String,
+    collector_endpoint: Url,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Config {
+    package: Package,
+    otlp: OTLP,
+    environment: String,
+    log_directory: PathBuf,
+    image_cache_directory: PathBuf,
+}
+
 #[rocket::main]
 async fn main() {
-    dotenv::dotenv().ok();
+    let config_path = std::env::var("PLATFORM_CONFIG_PATH")
+        .unwrap_or_else(|_| "./config.toml".into());
 
+    // Config
     let config: Config = Figment::new()
         .merge(Toml::file("Cargo.toml"))
-        .join(Json::file("app.json"))
+        .merge(Toml::file(config_path).nested())
         .extract()
         .unwrap();
 
+    // Logging
     let log_file_path = config.log_directory.join("all.log");
 
     let log_file = OpenOptions::new()
@@ -63,8 +93,7 @@ async fn main() {
         .open(&log_file_path)
         .expect(&format!("{:?}", log_file_path));
 
-    let filter = EnvFilter::from_default_env()
-        .add_directive(LevelFilter::WARN.into());
+    let filter = EnvFilter::from_default_env().add_directive(LevelFilter::WARN.into());
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -72,22 +101,21 @@ async fn main() {
         .compact()
         .init();
 
-
     // Metrics
     let exporter = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
-        .with_endpoint("http://localhost:4318/v1/metrics")
+        .with_endpoint(config.otlp.collector_endpoint)
         .build()
         .expect("Failed to create OTLP metrics exporter");
 
     let reader = PeriodicReader::builder(exporter).build();
     let resource = Resource::builder()
         .with_attributes([
-            KeyValue::new("service.name", "image-api"),
-            KeyValue::new("service.version", "0.1.0"),
-            KeyValue::new("service.instance.id", "home"),
-            KeyValue::new("environment", "development"),
+            KeyValue::new("service.name", config.package.name),
+            KeyValue::new("service.version", config.package.version),
+            KeyValue::new("service.instance.id", config.otlp.instance_id),
+            KeyValue::new("environment", config.environment),
         ])
         .build();
 
@@ -98,8 +126,10 @@ async fn main() {
 
     global::set_meter_provider(provider);
 
+    // Image Cache
+    let image_cache = MmapImageCache::new(config.image_cache_directory);
+
     // Rocket
-    let image_cache = MmapImageCache::from_env();
     let image_client = ImageClient::new(
         ImageGenerator::new(),
         image_cache.clone(),

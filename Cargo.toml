@@ -31,4 +31,5 @@ opentelemetry_sdk = "0.31.0"
 opentelemetry = "0.31.0"
 opentelemetry-otlp = { version = "0.31", features = ["http-json", "metrics"] }
 uuid = { version = "1.23.0", features = ["v4"] }
-figment = { version = "0.10.19", features = ["json"] }
+figment = "0.10.19"
+url = { version = "2.5.8", features = ["serde"] }

@@ -2,4 +2,4 @@ cache
 logs
 .env
 target
-app.json
+config.toml

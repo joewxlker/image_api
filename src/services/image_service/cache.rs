@@ -74,14 +74,6 @@ impl MmapImageCache {
 
         Self { path }
     }
-    pub fn from_env() -> Self {
-        dotenv::dotenv().ok();
-        let path = std::env::var("IMAGE_CACHE_PATH").expect(&format!(
-            "Missing env var IMAGE_CACHE_PATH required for MmapImageCache"
-        ));
-
-        Self::new(PathBuf::from(path))
-    }
 }
 
 const GRACE_PERIOD: Duration = Duration::from_millis(10);

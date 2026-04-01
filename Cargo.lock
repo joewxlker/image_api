@@ -454,7 +454,6 @@ dependencies = [
  "atomic 0.6.1",
  "pear",
  "serde",
- "serde_json",
  "toml",
  "uncased",
  "version_check",
@@ -1502,6 +1501,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "validator",
 ]
@@ -2706,6 +2706,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
