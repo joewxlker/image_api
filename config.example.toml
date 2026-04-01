@@ -1,10 +1,10 @@
 # Example configuration - copy to config/local.toml or similar and customize
 
-[otlp]
+[default.otlp]
 instance_id = "your-instance-name"          # e.g. "production-server-01"
 collector_endpoint = "http://localhost:4318/v1/metrics"
 
+[default]
 environment = "local"                       # local | staging | production
-
 log_directory = "./logs"
 image_cache_directory = "./cache/images"
