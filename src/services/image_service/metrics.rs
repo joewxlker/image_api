@@ -17,6 +17,12 @@ use crate::services::image_service::{
     r#gen::ImageGenerationParams,
 };
 
+const TIME_BOUNDARIES: &[f64] = &[
+    0.001, 0.002, 0.005, 0.01, 0.02,
+    0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 
+    3.0, 5.0, 8.0, 10.0, 15.0, 20.0,
+];
+
 #[derive(Clone, Debug)]
 pub struct ImageMetrics {
     success_counter: Counter<u64>,
@@ -40,6 +46,7 @@ impl ImageMetrics {
 
             success_time: meter
                 .f64_histogram("image_service.success_time")
+                .with_boundaries(TIME_BOUNDARIES.into())
                 .with_unit("s")
                 .with_description("Time taken for successful image processing")
                 .build(),
@@ -52,16 +59,19 @@ impl ImageMetrics {
 
             cache_hit_time: meter
                 .f64_histogram("image_service.cache_hit_time")
+                .with_boundaries(TIME_BOUNDARIES.into())
                 .with_unit("s")
                 .build(),
 
             cache_miss_time: meter
                 .f64_histogram("image_service.cache_miss_time")
+                .with_boundaries(TIME_BOUNDARIES.into())
                 .with_unit("s")
                 .build(),
 
             error_time: meter
                 .f64_histogram("image_service.error_time")
+                .with_boundaries(TIME_BOUNDARIES.into())
                 .with_unit("s")
                 .build(),
 
