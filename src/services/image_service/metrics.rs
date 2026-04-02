@@ -87,18 +87,20 @@ impl ImageMetrics {
         if result.is_cached() {
             self.cache_hit_time.record(duration, &[]);
             self.cache_hit_counter.add(1, &[]);
+
             if start.elapsed() > Duration::from_millis(500) {
                 tracing::warn!(
-                    duration_ms = start.elapsed().as_millis(),
+                    duration_ms = duration,
                     threshold_ms = 500,
                     "Slow cache hit: took longer than 500 ms"
                 );
             }
+
             tracing::debug!("Loaded image from cache in {:?}", start.elapsed());
         } else {
-            self.cache_miss_time
-                .record(duration, &[KeyValue::new("key", key.to_string())]);
+            self.cache_miss_time.record(duration, &[]);
             self.cache_miss_counter.add(1, &[]);
+
             tracing::debug!("Generated image in {:?}", start.elapsed());
         }
     }
