@@ -79,7 +79,6 @@ async fn main() {
 
     // Config
     let config: Config = Figment::new()
-        .merge(Toml::file("Cargo.toml"))
         .merge(Toml::file(config_path).nested())
         .extract()
         .unwrap();
