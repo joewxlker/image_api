@@ -5,6 +5,12 @@ use rocket::fairing::{Fairing, Info, Kind};
 use rocket::{Data, Request, Response};
 use std::time::Instant;
 
+const TIME_BOUNDARIES: &[f64] = &[
+    0.001, 0.002, 0.005, 0.01, 0.02,
+    0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 
+    3.0, 5.0, 8.0, 10.0, 15.0, 20.0,
+];
+
 pub struct RequestMetricsFairing {
     requests_total: Counter<u64>,
     request_duration: Histogram<f64>,
@@ -24,6 +30,7 @@ impl RequestMetricsFairing {
             request_duration: meter
                 .f64_histogram("http.request.duration.seconds")
                 .with_unit("s")
+                .with_boundaries(TIME_BOUNDARIES.into())
                 .with_description("Duration of HTTP requests in seconds")
                 .build(),
 
