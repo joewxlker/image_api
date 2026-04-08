@@ -74,8 +74,8 @@ struct Config {
 
 #[rocket::main]
 async fn main() {
-    let config_path = std::env::var("PLATFORM_CONFIG_PATH")
-        .unwrap_or_else(|_| "./config.toml".into());
+    let config_path =
+        std::env::var("PLATFORM_CONFIG_PATH").unwrap_or_else(|_| "./config.toml".into());
 
     // Config
     let config: Config = Figment::new()
