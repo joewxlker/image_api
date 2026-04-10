@@ -75,12 +75,23 @@ struct Config {
     image_cache_directory: PathBuf,
 }
 
+fn get_resource(config: &Config) -> Resource {
+    Resource::builder()
+        .with_attributes([
+            KeyValue::new("service.name", config.package.name.clone()),
+            KeyValue::new("service.version", config.package.version.clone()),
+            KeyValue::new("service.instance.id", config.otlp.instance_id.clone()),
+            KeyValue::new("environment", config.environment.clone()),
+        ])
+        .build()
+}
+
 #[rocket::main]
 async fn main() {
+    // Config
     let config_path =
         std::env::var("PLATFORM_CONFIG_PATH").unwrap_or_else(|_| "./config.toml".into());
 
-    // Config
     let config: Config = Figment::new()
         .merge(Toml::file(config_path).nested())
         .extract()
@@ -108,16 +119,7 @@ async fn main() {
 
     let logger_provider = SdkLoggerProvider::builder()
         .with_log_processor(processor)
-        .with_resource(
-            Resource::builder()
-                .with_attributes([
-                    KeyValue::new("service.name", config.package.name.clone()),
-                    KeyValue::new("service.version", config.package.version.clone()),
-                    KeyValue::new("service.instance.id", config.otlp.instance_id.clone()),
-                    KeyValue::new("environment", config.environment.clone()),
-                ])
-                .build(),
-        )
+        .with_resource(get_resource(&config))
         .build();
 
     let otel_layer =
@@ -142,17 +144,9 @@ async fn main() {
         .expect("Failed to create OTLP metrics exporter");
 
     let reader = PeriodicReader::builder(exporter).build();
-    let resource = Resource::builder()
-        .with_attributes([
-            KeyValue::new("service.name", config.package.name),
-            KeyValue::new("service.version", config.package.version),
-            KeyValue::new("service.instance.id", config.otlp.instance_id),
-            KeyValue::new("environment", config.environment),
-        ])
-        .build();
 
     let provider = SdkMeterProvider::builder()
-        .with_resource(resource)
+        .with_resource(get_resource(&config))
         .with_reader(reader)
         .build();
 
@@ -161,13 +155,13 @@ async fn main() {
     // Image Cache
     let image_cache = MmapImageCache::new(config.image_cache_directory);
 
-    // Rocket
     let image_client = ImageClient::new(
         ImageGenerator::new(),
         image_cache.clone(),
         ImageMetrics::new(),
     );
 
+    // Rocket
     let server = rocket::Rocket::build()
         .attach(CORS)
         .attach(RequestMetricsFairing::new())
@@ -186,7 +180,7 @@ async fn main() {
             println!("Received SIGINT. Requesting shutdown.");
 
             let mut errors = vec![];
-            
+
             if let Err(err) = provider.shutdown() {
                 errors.push(format!("metrics: {err}"));
             }
