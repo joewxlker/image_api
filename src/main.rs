@@ -3,10 +3,13 @@ use std::path::PathBuf;
 
 use figment::Figment;
 use figment::providers::{Format, Toml};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_sdk::logs::{BatchConfig, BatchLogProcessor, SdkLoggerProvider};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 use url::Url;
 
 use crate::middleware::metrics::RequestMetricsFairing;
@@ -21,7 +24,7 @@ mod routes;
 mod services;
 
 use opentelemetry::{KeyValue, global};
-use opentelemetry_otlp::{MetricExporter, Protocol, WithExportConfig};
+use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 
@@ -92,19 +95,49 @@ async fn main() {
         .open(&log_file_path)
         .expect(&format!("{:?}", log_file_path));
 
-    let filter = EnvFilter::from_default_env().add_directive(LevelFilter::WARN.into());
+    let exporter = LogExporter::builder()
+        .with_http()
+        .with_protocol(Protocol::HttpJson)
+        .with_endpoint(config.otlp.collector_endpoint.clone().join("logs").unwrap())
+        .build()
+        .expect("Failed to create OTLP logs exporter");
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let processor = BatchLogProcessor::builder(exporter)
+        .with_batch_config(BatchConfig::default())
+        .build();
+
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_log_processor(processor)
+        .with_resource(
+            Resource::builder()
+                .with_attributes([
+                    KeyValue::new("service.name", config.package.name.clone()),
+                    KeyValue::new("service.version", config.package.version.clone()),
+                    KeyValue::new("service.instance.id", config.otlp.instance_id.clone()),
+                    KeyValue::new("environment", config.environment.clone()),
+                ])
+                .build(),
+        )
+        .build();
+
+    let otel_layer =
+        OpenTelemetryTracingBridge::new(&logger_provider).with_filter(EnvFilter::new("warn"));
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(log_file)
         .compact()
+        .with_filter(EnvFilter::new("warn"));
+
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(otel_layer)
         .init();
 
     // Metrics
     let exporter = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
-        .with_endpoint(config.otlp.collector_endpoint)
+        .with_endpoint(config.otlp.collector_endpoint.join("metrics").unwrap())
         .build()
         .expect("Failed to create OTLP metrics exporter");
 
@@ -123,7 +156,7 @@ async fn main() {
         .with_reader(reader)
         .build();
 
-    global::set_meter_provider(provider);
+    global::set_meter_provider(provider.clone());
 
     // Image Cache
     let image_cache = MmapImageCache::new(config.image_cache_directory);
@@ -147,6 +180,28 @@ async fn main() {
         rocket = server => {
             if let Err(err) = rocket {
                 eprintln!("{err}");
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            println!("Received SIGINT. Requesting shutdown.");
+
+            let mut errors = vec![];
+            
+            if let Err(err) = provider.shutdown() {
+                errors.push(format!("metrics: {err}"));
+            }
+
+            if let Err(err) = logger_provider.shutdown() {
+                errors.push(format!("logs: {err}"));
+            }
+
+            if !errors.is_empty() {
+                eprintln!(
+                    "Failed to shutdown providers: {}",
+                    errors.join("\n")
+                )
+            } else {
+                println!("Shutdown successful.")
             }
         }
     }
