@@ -65,15 +65,63 @@ pub struct MmapImageCache {
 }
 
 impl MmapImageCache {
-    pub fn new(path: PathBuf) -> Self {
-        assert!(
-            path.exists(),
-            "Path {:?} required by MmapImageCache does not exist",
-            path
-        );
+    pub fn from_path(path: PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
+        if !path.exists() {
+            return Err(MmapImageCacheFromPathError::PathInvalid {
+                path,
+                kind: PathInvalidKind::DoesNotExist,
+            });
+        }
 
-        Self { path }
+        if !path.is_dir() {
+            return Err(MmapImageCacheFromPathError::PathInvalid {
+                path,
+                kind: PathInvalidKind::NotADirectory,
+            });
+        }
+
+        let metadata = match path.metadata() {
+            Ok(meta) => meta,
+            Err(source) => {
+                return Err(MmapImageCacheFromPathError::ReadMetadataError { source, path });
+            }
+        };
+
+        if metadata.permissions().readonly() {
+            return Err(MmapImageCacheFromPathError::PathInvalid {
+                path,
+                kind: PathInvalidKind::ReadOnly,
+            });
+        }
+
+        Ok(Self { path })
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum PathInvalidKind {
+    #[error("does not exist")]
+    DoesNotExist,
+    #[error("is not a directory")]
+    NotADirectory,
+    #[error("is read-only")]
+    ReadOnly,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum MmapImageCacheFromPathError {
+    #[error("Cannot create `MmapImageCache`: the path `{path}` {kind}")]
+    PathInvalid {
+        path: PathBuf,
+        kind: PathInvalidKind,
+    },
+
+    #[error("Cannot create MmapImageCache: failed to read metadata of `{path}`: {source}")]
+    ReadMetadataError {
+        #[source]
+        source: std::io::Error,
+        path: PathBuf,
+    },
 }
 
 const GRACE_PERIOD: Duration = Duration::from_millis(10);

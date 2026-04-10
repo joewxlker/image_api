@@ -87,15 +87,19 @@ fn get_resource(config: &Config) -> Resource {
 }
 
 #[rocket::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Config
-    let config_path =
-        std::env::var("PLATFORM_CONFIG_PATH").unwrap_or_else(|_| "./config.toml".into());
+    let config_path = std::env::var("PLATFORM_CONFIG_PATH")
+        .unwrap_or_else(|_| "./config.toml".into())
+        .parse::<PathBuf>()?;
+
+    if !config_path.exists() {
+        return Err(format!("config file at path {:?} was not found", config_path).into());
+    }
 
     let config: Config = Figment::new()
         .merge(Toml::file(config_path).nested())
-        .extract()
-        .unwrap();
+        .extract()?;
 
     // Logging
     let log_file_path = config.log_directory.join("all.log");
@@ -104,14 +108,14 @@ async fn main() {
         .append(true)
         .create(true)
         .open(&log_file_path)
-        .expect(&format!("{:?}", log_file_path));
+        .map_err(|e| format!("{e}: {:?}", log_file_path))?;
 
+    let log_endpoint = config.otlp.collector_endpoint.join("logs")?;
     let exporter = LogExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
-        .with_endpoint(config.otlp.collector_endpoint.clone().join("logs").unwrap())
-        .build()
-        .expect("Failed to create OTLP logs exporter");
+        .with_endpoint(log_endpoint)
+        .build()?;
 
     let processor = BatchLogProcessor::builder(exporter)
         .with_batch_config(BatchConfig::default())
@@ -136,12 +140,12 @@ async fn main() {
         .init();
 
     // Metrics
+    let metrics_endpoint = config.otlp.collector_endpoint.join("metrics")?;
     let exporter = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
-        .with_endpoint(config.otlp.collector_endpoint.join("metrics").unwrap())
-        .build()
-        .expect("Failed to create OTLP metrics exporter");
+        .with_endpoint(metrics_endpoint)
+        .build()?;
 
     let reader = PeriodicReader::builder(exporter).build();
 
@@ -153,7 +157,7 @@ async fn main() {
     global::set_meter_provider(provider.clone());
 
     // Image Cache
-    let image_cache = MmapImageCache::new(config.image_cache_directory);
+    let image_cache = MmapImageCache::from_path(config.image_cache_directory)?;
 
     let image_client = ImageClient::new(
         ImageGenerator::new(),
@@ -172,9 +176,7 @@ async fn main() {
 
     select! {
         rocket = server => {
-            if let Err(err) = rocket {
-                eprintln!("{err}");
-            }
+            let _ = rocket?;
         }
         _ = tokio::signal::ctrl_c() => {
             println!("Received SIGINT. Requesting shutdown.");
@@ -199,4 +201,6 @@ async fn main() {
             }
         }
     }
+
+    Ok(())
 }
