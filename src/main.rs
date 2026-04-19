@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(log_file)
         .compact()
-        .with_filter(EnvFilter::new("warn"));
+        .with_filter(EnvFilter::new("trace"));
 
     tracing_subscriber::registry()
         .with(fmt_layer)
