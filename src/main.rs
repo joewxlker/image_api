@@ -115,7 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .open(&log_file_path)
         .map_err(|e| format!("{e}: {:?}", log_file_path))?;
 
-    let log_endpoint = config.otlp.collector_endpoint.join("/v1")?.join("/logs")?;
+    let log_endpoint = config.otlp.collector_endpoint.join("/v1/logs")?;
+
     let exporter = LogExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
@@ -145,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Metrics
-    let metrics_endpoint = config.otlp.collector_endpoint.join("/v1")?.join("/metrics")?;
+    let metrics_endpoint = config.otlp.collector_endpoint.join("/v1/metrics")?;
     let exporter = MetricExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpJson)
