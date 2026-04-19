@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let otel_layer =
-        OpenTelemetryTracingBridge::new(&logger_provider).with_filter(EnvFilter::new("warn"));
+        OpenTelemetryTracingBridge::new(&logger_provider).with_filter(EnvFilter::new("trace"));
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(log_file)
