@@ -28,7 +28,7 @@ pub async fn initialize_metrics(
         return Ok(Some(provider));
     } else if config.otlp.collect_metrics && config.otlp.collector_endpoint.is_none() {
         tracing::warn!(
-            "OTLP metrics export is enabled, but no collector endpoint is configured; metrics will not be exported"
+            "OTLP metrics export is enabled, but no collector endpoint is configured; metrics will not be recorded"
         );
     } else {
         tracing::info!("OTLP metrics export is disabled by configuration");
