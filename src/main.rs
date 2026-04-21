@@ -45,11 +45,6 @@ impl Fairing for CORS {
     }
 }
 
-#[rocket::get("/")]
-fn index() -> &'static str {
-    "OK"
-}
-
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Config
@@ -80,7 +75,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach(RequestMetricsFairing::new())
         .manage(image_client)
         .manage(image_cache)
-        .mount("/", rocket::routes![index])
         .mount("/images", images::images_routes())
         .launch();
 
