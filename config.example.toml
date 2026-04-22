@@ -5,7 +5,10 @@ version = "0.1.0"
 
 [default.otlp]
 instance_id = "your-instance-name"          # e.g. "production-server-01"
-collector_endpoint = "http://localhost:4318/v1/metrics"
+collect_logs = true
+collect_metrics = true
+metrics_endpoint = "http://localhost:4318/v1/metrics"
+logs_endpoint = "http://localhost:4318/v1/metrics"
 
 [default]
 environment = "local"                       # local | staging | production

@@ -1,6 +1,6 @@
 use std::{fs::OpenOptions, path::PathBuf};
 
-use tracing_subscriber::{Layer, layer::SubscriberExt};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::services::log_service::ENV_FILTER;
 
@@ -18,9 +18,7 @@ pub fn file_logger(log_file_path: &PathBuf) -> Result<(), Box<dyn std::error::Er
         .compact()
         .with_filter(filter);
 
-    let file_logger = tracing_subscriber::registry().with(fmt_layer);
-
-    tracing::subscriber::set_global_default(file_logger)?;
+    tracing_subscriber::registry().with(fmt_layer).init();
 
     tracing::info!(
         path = %log_file_path.display(),

@@ -1,14 +1,17 @@
 use opentelemetry::global;
 use opentelemetry_otlp::{MetricExporter, Protocol, WithExportConfig};
-use opentelemetry_sdk::{Resource, metrics::{PeriodicReader, SdkMeterProvider}};
+use opentelemetry_sdk::{
+    Resource,
+    metrics::{PeriodicReader, SdkMeterProvider},
+};
 use url::Url;
 
 pub async fn otel_metrics(
-    metrics_endpoint: Url,
-    resource: Resource,
+    metrics_endpoint: &Url,
+    resource: &Resource,
 ) -> Result<SdkMeterProvider, Box<dyn std::error::Error>> {
     if let Err(err) = reqwest::Client::new()
-        .get(metrics_endpoint.clone())
+        .get(metrics_endpoint.as_str())
         .send()
         .await
     {

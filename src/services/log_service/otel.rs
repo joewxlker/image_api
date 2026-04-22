@@ -1,17 +1,20 @@
-use opentelemetry_appender_tracing::layer::{OpenTelemetryTracingBridge as OtelBridge};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge as OtelBridge;
 use opentelemetry_otlp::{LogExporter, Protocol, WithExportConfig};
-use opentelemetry_sdk::{Resource, logs::{BatchConfig, BatchLogProcessor, SdkLoggerProvider}};
-use tracing_subscriber::{Layer, layer::SubscriberExt};
+use opentelemetry_sdk::{
+    Resource,
+    logs::{BatchConfig, BatchLogProcessor, SdkLoggerProvider},
+};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
 use crate::services::log_service::ENV_FILTER;
 
 pub async fn otel_logger(
     logs_endpoint: &Url,
-    resource: Resource,
+    resource: &Resource,
 ) -> Result<SdkLoggerProvider, Box<dyn std::error::Error>> {
     if let Err(err) = reqwest::Client::new()
-        .get(logs_endpoint.clone())
+        .get(logs_endpoint.as_str())
         .send()
         .await
     {
@@ -44,10 +47,9 @@ pub async fn otel_logger(
 
     let filter = ENV_FILTER.clone();
 
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::registry()
-            .with(OtelBridge::new(&provider).with_filter(filter)),
-    )?;
+    tracing_subscriber::registry()
+        .with(OtelBridge::new(&provider).with_filter(filter))
+        .init();
 
     return Ok(provider);
 }

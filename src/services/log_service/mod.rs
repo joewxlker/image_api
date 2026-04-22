@@ -1,9 +1,23 @@
-use std::{cell::LazyCell, sync::Arc};
+use std::{
+    cell::LazyCell,
+    sync::{Arc, LazyLock},
+};
 
-use opentelemetry_sdk::{Resource, logs::SdkLoggerProvider};
-use tracing_subscriber::{EnvFilter, Layer, Registry, filter::Filtered, fmt::{self, format::{Compact, DefaultFields}}, layer::{Layered, SubscriberExt}};
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry,
+    filter::Filtered,
+    fmt::{
+        self,
+        format::{Compact, DefaultFields},
+    },
+    layer::{Layered, SubscriberExt},
+};
 
-use crate::{config::Config, services::log_service::{fs::file_logger, otel::otel_logger}};
+use crate::{
+    config::{LOG_FILE_ALL, OTLP_COLLECT_LOGS, OTLP_LOGS_ENDPOINT, OTLP_RESOURCE},
+    services::log_service::{fs::file_logger, otel::otel_logger},
+};
 
 pub mod fs;
 pub mod otel;
@@ -19,7 +33,7 @@ pub type SimpleLogger = Arc<
     >,
 >;
 
-pub const STDOUT_LOGGER: LazyCell<SimpleLogger> = LazyCell::new(|| {
+pub static STDOUT_LOGGER: LazyLock<SimpleLogger> = LazyLock::new(|| {
     let filter = EnvFilter::new(
         "info,\
          rocket=off,\
@@ -57,21 +71,16 @@ pub const ENV_FILTER: LazyCell<EnvFilter> = LazyCell::new(|| {
     )
 });
 
-pub async fn initialize_logging(
-    config: &Config,
-) -> Result<Option<SdkLoggerProvider>, Box<dyn std::error::Error>> {
-    if config.otlp.collect_logs && config.otlp.collector_endpoint.is_some() {
-        let collector_endpoint = config.otlp.collector_endpoint.clone().unwrap();
-
-        let logs_endpoint = collector_endpoint.join("/v1/logs")?;
-        let resource = Resource::from(config);
+pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn std::error::Error>> {
+    if *OTLP_COLLECT_LOGS && OTLP_LOGS_ENDPOINT.is_some() {
+        let logs_endpoint = OTLP_LOGS_ENDPOINT.clone().unwrap();
 
         tracing::info!(
             endpoint = %logs_endpoint,
             "OTLP logging enabled; initializing remote log exporter"
         );
 
-        let provider = otel_logger(&logs_endpoint, resource).await?;
+        let provider = otel_logger(&logs_endpoint, &OTLP_RESOURCE).await?;
 
         tracing::info!(
             endpoint = %logs_endpoint,
@@ -79,7 +88,7 @@ pub async fn initialize_logging(
         );
 
         return Ok(Some(provider));
-    } else if config.otlp.collect_logs && config.otlp.collector_endpoint.is_none() {
+    } else if *OTLP_COLLECT_LOGS && OTLP_LOGS_ENDPOINT.is_none() {
         tracing::warn!(
             "OTLP logging is enabled, but no collector endpoint is configured; falling back to file logging"
         );
@@ -87,17 +96,15 @@ pub async fn initialize_logging(
         tracing::info!("OTLP logging is disabled by configuration; using file logging");
     }
 
-    let log_file_path = config.log_directory.join("output.log");
-
     tracing::info!(
-        path = %log_file_path.display(),
+        path = %LOG_FILE_ALL.display(),
         "Initializing file logger"
     );
 
-    file_logger(&log_file_path)?;
+    file_logger(&LOG_FILE_ALL)?;
 
     tracing::info!(
-        path = %log_file_path.display(),
+        path = %LOG_FILE_ALL.display(),
         "File logging initialized successfully"
     );
 

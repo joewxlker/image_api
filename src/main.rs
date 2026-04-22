@@ -1,8 +1,6 @@
-use tokio::select;
-
 use tracing::instrument::WithSubscriber;
 
-use crate::config::Config;
+use crate::config::IMAGE_CACHE_DIRECTORY;
 use crate::middleware::cors::CORS;
 use crate::middleware::metrics::RequestMetricsFairing;
 use crate::routes::images;
@@ -22,21 +20,18 @@ mod services;
 
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Config
-    let config = Config::from_env()?;
-
     // Logging
-    let logger_provider = initialize_logging(&config)
+    let logger_provider = initialize_logging()
         .with_subscriber(STDOUT_LOGGER.clone())
         .await?;
 
     // Metrics
-    let meter_provider = initialize_metrics(&config)
+    let meter_provider = initialize_metrics()
         .with_subscriber(STDOUT_LOGGER.clone())
         .await?;
 
     // Image Cache
-    let image_cache = MmapImageCache::from_path(config.image_cache_directory)?;
+    let image_cache = MmapImageCache::from_static_path(&IMAGE_CACHE_DIRECTORY)?;
 
     let image_client = ImageClient::new(
         ImageGenerator::new(),
@@ -45,28 +40,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Rocket
-    let server = rocket::Rocket::build()
+    rocket::Rocket::build()
         .attach(CORS)
         .attach(RequestMetricsFairing::new())
         .manage(image_client)
         .manage(image_cache)
         .mount("/images", images::images_routes())
-        .launch();
+        .launch()
+        .await?;
 
-    select! {
-        rocket = server => {
-            let _ = rocket?;
-        }
-        _ = tokio::signal::ctrl_c() => {
-            if let Some(provider) = logger_provider {
-                shutdown_otel_logging(provider)
-                    .with_subscriber(STDOUT_LOGGER.clone()).await;
-            }
-            if let Some(provider) = meter_provider {
-                shutdown_otel_metrics(provider)
-                    .with_subscriber(STDOUT_LOGGER.clone()).await;
-            }
-        }
+    if let Some(provider) = logger_provider {
+        shutdown_otel_logging(provider)
+            .with_subscriber(STDOUT_LOGGER.clone())
+            .await;
+    }
+
+    if let Some(provider) = meter_provider {
+        shutdown_otel_metrics(provider)
+            .with_subscriber(STDOUT_LOGGER.clone())
+            .await;
     }
 
     Ok(())

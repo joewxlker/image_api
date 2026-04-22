@@ -1661,6 +1661,7 @@ dependencies = [
  "filetime",
  "image",
  "jpeg-encoder",
+ "lazy_static",
  "log",
  "metrics",
  "metrics-exporter-otel",

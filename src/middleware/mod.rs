@@ -1,2 +1,2 @@
-pub mod metrics;
 pub mod cors;
+pub mod metrics;

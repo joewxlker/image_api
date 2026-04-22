@@ -65,6 +65,9 @@ pub struct MmapImageCache {
 }
 
 impl MmapImageCache {
+    pub fn from_static_path(path: &'static PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
+        Self::from_path(path.to_path_buf())
+    }
     pub fn from_path(path: PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
         if !path.exists() {
             return Err(MmapImageCacheFromPathError::PathInvalid {
