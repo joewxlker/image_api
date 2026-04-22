@@ -8,8 +8,9 @@ use crate::services::image_service::cache::MmapImageCache;
 use crate::services::image_service::client::ImageClient;
 use crate::services::image_service::r#gen::ImageGenerator;
 use crate::services::image_service::metrics::ImageMetrics;
+use crate::services::log_service::initialize_logging;
 use crate::services::log_service::otel::shutdown_otel_logging;
-use crate::services::log_service::{STDOUT_LOGGER, initialize_logging};
+use crate::services::log_service::stdout::STDOUT_LOGGER;
 use crate::services::metrics_service::initialize_metrics;
 use crate::services::metrics_service::otel::shutdown_otel_metrics;
 

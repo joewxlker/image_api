@@ -1,64 +1,21 @@
-use std::{
-    cell::LazyCell,
-    sync::{Arc, LazyLock},
-};
+use std::cell::LazyCell;
 
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use tracing_subscriber::{
-    EnvFilter, Layer, Registry,
-    filter::Filtered,
-    fmt::{
-        self,
-        format::{Compact, DefaultFields},
-    },
-    layer::{Layered, SubscriberExt},
-};
+use tracing_subscriber::EnvFilter;
 
 use crate::{
-    config::{LOG_FILE_ALL, OTLP_COLLECT_LOGS, OTLP_LOGS_ENDPOINT, OTLP_RESOURCE},
-    services::log_service::{fs::file_logger, otel::otel_logger},
+    config::{LOG_FILE_ALL, LOG_TO_FILE, OTLP_COLLECT_LOGS, OTLP_LOGS_ENDPOINT, OTLP_RESOURCE},
+    services::log_service::{fs::file_logger, otel::otel_logger, stdout::stdout_logger},
 };
 
-pub mod fs;
+mod fs;
 pub mod otel;
-
-pub type SimpleLogger = Arc<
-    Layered<
-        Filtered<
-            fmt::Layer<Registry, DefaultFields, fmt::format::Format<Compact>>,
-            EnvFilter,
-            Registry,
-        >,
-        Registry,
-    >,
->;
-
-pub static STDOUT_LOGGER: LazyLock<SimpleLogger> = LazyLock::new(|| {
-    let filter = EnvFilter::new(
-        "info,\
-         rocket=off,\
-         rocket_codegen=off,\
-         rocket_http=off,\
-         hyper=off,\
-         h2=off,\
-         mio=off,\
-         tokio_util=off,\
-         want=off,\
-         tower=off,\
-         tracing::span=off",
-    );
-
-    let fmt_layer = fmt::layer().compact().with_filter(filter);
-
-    let registry = Registry::default().with(fmt_layer);
-
-    Arc::new(registry)
-});
+pub mod stdout;
 
 pub const ENV_FILTER: LazyCell<EnvFilter> = LazyCell::new(|| {
     EnvFilter::new(
         "info,\
-         rocket=off,\
+         rocket=warn,\
          rocket_codegen=off,\
          rocket_http=off,\
          hyper=off,\
@@ -92,21 +49,25 @@ pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn s
         tracing::warn!(
             "OTLP logging is enabled, but no collector endpoint is configured; falling back to file logging"
         );
-    } else {
+    } else if *LOG_TO_FILE {
         tracing::info!("OTLP logging is disabled by configuration; using file logging");
+
+        tracing::info!(
+            path = %LOG_FILE_ALL.display(),
+            "Initializing file logger"
+        );
+
+        file_logger(&LOG_FILE_ALL)?;
+
+        tracing::info!(
+            path = %LOG_FILE_ALL.display(),
+            "File logging initialized successfully"
+        );
+    } else {
+        tracing::warn!("No logging backend configured; falling back to stdout-only logging");
+
+        stdout_logger();
     }
-
-    tracing::info!(
-        path = %LOG_FILE_ALL.display(),
-        "Initializing file logger"
-    );
-
-    file_logger(&LOG_FILE_ALL)?;
-
-    tracing::info!(
-        path = %LOG_FILE_ALL.display(),
-        "File logging initialized successfully"
-    );
 
     Ok(None)
 }
