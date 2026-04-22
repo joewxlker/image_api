@@ -30,12 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_subscriber(STDOUT_LOGGER.clone())
         .await?;
 
-    // Image Cache
-    let image_cache = MmapImageCache::from_static_path(&IMAGE_CACHE_DIRECTORY)?;
-
+    // Image Client;
     let image_client = ImageClient::new(
         ImageGenerator::new(),
-        image_cache.clone(),
+        MmapImageCache::from_static_path(&IMAGE_CACHE_DIRECTORY)?,
         ImageMetrics::new(),
     );
 
@@ -44,7 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach(CORS)
         .attach(RequestMetricsFairing::new())
         .manage(image_client)
-        .manage(image_cache)
         .mount("/images", images::images_routes())
         .launch()
         .await?;

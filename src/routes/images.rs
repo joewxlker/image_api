@@ -12,7 +12,7 @@ use tracing::instrument;
 use validator::ValidationErrors;
 
 use crate::services::image_service::{
-    cache::{ImageMetadata, MmapImageCache, MmapImageCacheError},
+    cache::{ImageMetadata, MmapImageCacheError},
     client::{ImageClient, ImageClientError},
     r#gen::ImageGenerationParams,
 };
@@ -28,20 +28,20 @@ pub async fn get_image<'a>(
     let dimensions = ImageGenerationParams::build(index, width, height)?;
 
     let mut image_client = image_client.inner().clone();
-    let result = image_client.call(dimensions).await?;
+    let result = image_client.image(dimensions).await?;
 
     Ok(ImageBytes(result.bytes_owned()))
 }
 
-#[instrument(skip(cache))]
+#[instrument(skip(image_client))]
 #[rocket::get("/<index>/metadata?<width>&<height>")]
 pub async fn get_metadata<'a>(
     index: u32,
     width: u32,
     height: u32,
-    cache: &State<MmapImageCache>,
+    image_client: &State<ImageClient>,
 ) -> Result<Json<ImageMetadata>, ImageRouteError> {
-    let metadata = cache.read_image_metadata(index, width, height).await?;
+    let metadata = image_client.metadata(index, width, height).await?;
 
     Ok(Json(metadata))
 }

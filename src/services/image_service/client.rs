@@ -1,7 +1,10 @@
 use tower::{Layer, Service, ServiceBuilder};
 
 use crate::services::image_service::{
-    cache::{ImageCacheService, ImageCacheServiceResult, MmapImageCache, MmapImageCacheError},
+    cache::{
+        ImageCacheService, ImageCacheServiceResult, ImageMetadata, MmapImageCache,
+        MmapImageCacheError,
+    },
     r#gen::{ImageGenerationParams, ImageGenerator, ImageGeneratorError, ImageGeneratorService},
     metrics::{ImageMetrics, ImageMetricsService},
 };
@@ -9,6 +12,7 @@ use crate::services::image_service::{
 #[derive(Clone)]
 pub struct ImageClient {
     inner: ImageMetricsService,
+    cache: MmapImageCache,
 }
 
 impl ImageClient {
@@ -18,10 +22,25 @@ impl ImageClient {
             .layer(ImageCacheLayer(cache.clone()))
             .service(ImageGeneratorService::new(generator.clone()));
 
-        Self { inner }
+        Self { inner, cache }
     }
 
-    pub async fn call(
+    pub async fn metadata(
+        &self,
+        index: u32,
+        height: u32,
+        width: u32,
+    ) -> Result<ImageMetadata, ImageClientError> {
+        let result = self
+            .cache
+            .read_image_metadata(index, height, width)
+            .await
+            .map_err(ImageClientError::ImageCacheError)?;
+
+        Ok(result)
+    }
+
+    pub async fn image(
         &mut self,
         req: ImageGenerationParams,
     ) -> Result<ImageCacheServiceResult, ImageClientError> {
