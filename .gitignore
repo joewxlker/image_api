@@ -2,4 +2,4 @@ cache
 logs
 .env
 target
-config.toml
+Config.toml

@@ -61,7 +61,7 @@ impl Config {
                     path
                 })
                 .unwrap_or_else(|_| {
-                    let path = PathBuf::from("./config.toml");
+                    let path = PathBuf::from("./Config.toml");
                     tracing::info!(path = %path.display(), "Using default config path");
                     path
                 });
