@@ -11,11 +11,12 @@ use serde::{Deserialize, Serialize};
 use tracing::subscriber::with_default;
 use url::Url;
 
-use crate::services::log_service::STDOUT_LOGGER;
+use crate::services::log_service::stdout::STDOUT_LOGGER;
 
 lazy_static! {
     static ref CONFIG: Config = Config::from_env().unwrap();
     pub static ref LOG_FILE_ALL: PathBuf = CONFIG.log_directory.join("output.log");
+    pub static ref LOG_TO_FILE: bool = CONFIG.log_to_file;
     pub static ref LOG_DIRECTORY: &'static PathBuf = &CONFIG.log_directory;
     pub static ref IMAGE_CACHE_DIRECTORY: &'static PathBuf = &CONFIG.image_cache_directory;
     pub static ref OTLP_LOGS_ENDPOINT: &'static Option<Url> = &CONFIG.otlp.logs_endpoint;
@@ -47,6 +48,7 @@ struct Config {
     pub environment: String,
     pub log_directory: PathBuf,
     pub image_cache_directory: PathBuf,
+    pub log_to_file: bool,
 }
 
 impl Config {

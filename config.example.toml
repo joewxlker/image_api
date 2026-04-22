@@ -13,4 +13,5 @@ logs_endpoint = "http://localhost:4318/v1/metrics"
 [default]
 environment = "local"                       # local | staging | production
 log_directory = "./logs"
+log_to_file = true
 image_cache_directory = "./cache/images"
