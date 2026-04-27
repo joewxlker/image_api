@@ -28,11 +28,12 @@ pub type SimpleLogger = Arc<
 /// Holds a cloneable stdout logger provider with the filter [ENV_FILTER]
 /// 
 /// ## Examples
+/// 
 /// ```rust
 /// # use tracing::instrument::WithSubscriber;
 /// # use platform::services::log_service::stdout::STDOUT_LOGGER;
 /// # use tracing::subscriber::with_default;
-/// 
+/// #
 /// async fn some_async_task() {
 ///     tracing::info!("This will log to the terminal");
 /// }
