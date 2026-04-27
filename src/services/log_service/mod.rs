@@ -36,7 +36,7 @@ pub const ENV_FILTER: LazyCell<EnvFilter> = LazyCell::new(|| {
 /// # Errors
 ///
 /// - Returns an error if OTLP initialization or file logging setup fails.
-pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn std::error::Error>> {
+pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, LogServiceError> {
     if *OTLP_COLLECT_LOGS && OTLP_LOGS_ENDPOINT.is_some() {
         let logs_endpoint = OTLP_LOGS_ENDPOINT.clone().unwrap();
 
