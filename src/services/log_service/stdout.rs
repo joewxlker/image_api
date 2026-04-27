@@ -1,29 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
 use tracing_subscriber::{
-    EnvFilter, Layer, Registry,
-    filter::Filtered,
-    fmt::format::{Compact, DefaultFields},
-    layer::{Layered, SubscriberExt},
+    Layer, Registry,
+    layer::{SubscriberExt},
     util::SubscriberInitExt,
 };
 
 use crate::services::log_service::ENV_FILTER;
 
-pub type SimpleLogger = Arc<
-    Layered<
-        Filtered<
-            tracing_subscriber::fmt::Layer<
-                Registry,
-                DefaultFields,
-                tracing_subscriber::fmt::format::Format<Compact>,
-            >,
-            EnvFilter,
-            Registry,
-        >,
-        Registry,
-    >,
->;
+pub type SimpleLogger = Arc<dyn tracing::Subscriber + Send + Sync>;
 
 /// Holds a cloneable stdout logger subscriber using the env filter [ENV_FILTER].
 /// 
