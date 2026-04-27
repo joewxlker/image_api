@@ -1,23 +1,18 @@
 use tracing::instrument::WithSubscriber;
 
-use crate::config::IMAGE_CACHE_DIRECTORY;
-use crate::middleware::cors::CORS;
-use crate::middleware::metrics::RequestMetricsFairing;
-use crate::routes::images;
-use crate::services::image_service::cache::MmapImageCache;
-use crate::services::image_service::client::ImageClient;
-use crate::services::image_service::r#gen::ImageGenerator;
-use crate::services::image_service::metrics::ImageMetrics;
-use crate::services::log_service::initialize_logging;
-use crate::services::log_service::otel::shutdown_otel_logging;
-use crate::services::log_service::stdout::STDOUT_LOGGER;
-use crate::services::metrics_service::initialize_metrics;
-use crate::services::metrics_service::otel::shutdown_otel_metrics;
-
-mod config;
-mod middleware;
-mod routes;
-mod services;
+use platform::config::IMAGE_CACHE_DIRECTORY;
+use platform::middleware::cors::CORS;
+use platform::middleware::metrics::RequestMetricsFairing;
+use platform::routes::images;
+use platform::services::image_service::cache::MmapImageCache;
+use platform::services::image_service::client::ImageClient;
+use platform::services::image_service::r#gen::ImageGenerator;
+use platform::services::image_service::metrics::ImageMetrics;
+use platform::services::log_service::initialize_logging;
+use platform::services::log_service::otel::shutdown_otel_logging;
+use platform::services::log_service::stdout::STDOUT_LOGGER;
+use platform::services::metrics_service::initialize_metrics;
+use platform::services::metrics_service::otel::shutdown_otel_metrics;
 
 #[rocket::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
