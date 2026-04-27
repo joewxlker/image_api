@@ -35,8 +35,8 @@ use crate::services::log_service::ENV_FILTER;
 ///
 /// ```rust
 /// # use url::Url;
-/// # use crate::config::OTLP_RESOURCE;
-/// # use crate::services::log_service::otel::otel_logger;
+/// # use platform::config::OTLP_RESOURCE;
+/// # use platform::services::log_service::otel::otel_logger;
 /// # use opentelemetry_sdk::Resource;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let endpoint: Url = "http://localhost:4318/v1/logs".parse().unwrap();
