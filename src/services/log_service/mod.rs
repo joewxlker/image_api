@@ -28,6 +28,14 @@ pub const ENV_FILTER: LazyCell<EnvFilter> = LazyCell::new(|| {
     )
 });
 
+/// Initializes logging based on configuration.
+///
+/// Selects between OTLP, file, or stdout logging. Returns an OTLP
+/// [`SdkLoggerProvider`] if remote logging is enabled.
+///
+/// # Errors
+///
+/// - Returns an error if OTLP initialization or file logging setup fails.
 pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn std::error::Error>> {
     if *OTLP_COLLECT_LOGS && OTLP_LOGS_ENDPOINT.is_some() {
         let logs_endpoint = OTLP_LOGS_ENDPOINT.clone().unwrap();

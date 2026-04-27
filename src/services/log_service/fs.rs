@@ -4,6 +4,16 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::services::log_service::{ENV_FILTER, LogServiceError};
 
+/// Sets the global tracing subscriber to write logs to a file using the
+/// env filter [ENV_FILTER].
+///
+/// # Errors
+///
+/// - Returns [`LogServiceError::OpenFileError`] if the file cannot be opened or created.
+///
+/// # Panics
+///
+/// - Calling multiple `global-subscriber` setting functions will result in a panic.
 pub fn file_logger(log_file_path: &PathBuf) -> Result<(), LogServiceError> {
     let log_file = OpenOptions::new()
         .append(true)
