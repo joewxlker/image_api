@@ -8,21 +8,21 @@ use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
 use crate::services::log_service::ENV_FILTER;
- 
+
 /// Sets the global tracing subscriber to forward logs to the otlp log exporter  
 /// using the env filter [ENV_FILTER].
 ///
 /// Logs are batched and exported via HTTP to the defined endpoint.
-/// 
+///
 /// # Important
-/// 
-/// - This function must not be called more than once or with other 
+///
+/// - This function must not be called more than once or with other
 /// global subscriber setting functions.
-/// 
-/// - The endpoint's status is tested asynchronously for diagnostic purposes. 
-/// 
+///
+/// - The endpoint's status is tested asynchronously for diagnostic purposes.
+///
 ///   HTTP failures during this test are logged and do not affect execution.
-/// 
+///
 /// # Arguments
 ///
 /// - `logs_endpoint` - The OTLP HTTP endpoint to export logs to.
@@ -30,9 +30,9 @@ use crate::services::log_service::ENV_FILTER;
 ///   path is optional.
 ///
 /// - `resource` - The OpenTelemetry resource describing this service.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// # use url::Url;
 /// # use crate::config::OTLP_RESOURCE;
@@ -47,27 +47,27 @@ use crate::services::log_service::ENV_FILTER;
 /// # Ok(())
 /// # }
 /// ```
-/// 
+///
 /// # Panics
-/// 
-/// - Calling multiple 'global-subscriber' setting functions will result in a panic 
-/// 
-/// - Calling this function with invalid opentelemetry-otlp feature flags will result in a panic. 
-/// 
+///
+/// - Calling multiple 'global-subscriber' setting functions will result in a panic
+///
+/// - Calling this function with invalid opentelemetry-otlp feature flags will result in a panic.
+///
 ///   The supported feature-flag set is:
 ///   
 ///   ```toml
-///   default-features = false 
+///   default-features = false
 ///   features = [
-///       "reqwest-blocking-client", 
-///       "http-proto", 
-///       "trace", 
-///       "metrics", 
-///       "logs", 
+///       "reqwest-blocking-client",
+///       "http-proto",
+///       "trace",
+///       "metrics",
+///       "logs",
 ///       "internal-logs"
 ///   ]
 ///   ```
-/// 
+///
 ///   This is due to the SDK supporting multiple clients, which may or may not work in Tokio runtimes.
 pub async fn otel_logger(
     logs_endpoint: &Url,
