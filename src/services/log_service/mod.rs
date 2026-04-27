@@ -1,4 +1,4 @@
-use std::cell::LazyCell;
+use std::{cell::LazyCell, path::PathBuf};
 
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing_subscriber::EnvFilter;
@@ -70,4 +70,13 @@ pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn s
     }
 
     Ok(None)
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum LogServiceError {
+    #[error("failed to open log file `{0}`: {1}")]
+    OpenFileError(PathBuf, #[source] std::io::Error),
+
+    #[error("failed to build OTLP exporter: {0}")]
+    ExporterBuildError(#[from] opentelemetry_otlp::ExporterBuildError),
 }

@@ -7,7 +7,7 @@ use opentelemetry_sdk::{
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
-use crate::services::log_service::ENV_FILTER;
+use crate::services::log_service::{ENV_FILTER, LogServiceError};
 
 /// Sets the global tracing subscriber to forward logs to the otlp log exporter  
 /// using the env filter [ENV_FILTER].
@@ -72,7 +72,7 @@ use crate::services::log_service::ENV_FILTER;
 pub async fn otel_logger(
     logs_endpoint: &Url,
     resource: &Resource,
-) -> Result<SdkLoggerProvider, Box<dyn std::error::Error>> {
+) -> Result<SdkLoggerProvider, LogServiceError> {
     let endpoint = logs_endpoint.clone();
     tokio::spawn(async move { check_otlp_endpoint(&endpoint).await });
 
