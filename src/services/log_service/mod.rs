@@ -5,7 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::{LOG_FILE_ALL, LOG_TO_FILE, OTLP_COLLECT_LOGS, OTLP_LOGS_ENDPOINT, OTLP_RESOURCE},
-    services::log_service::{fs::file_logger, otel::otel_logger, stdout::stdout_logger},
+    services::log_service::{fs::file_logger, otel::otel_logger, stdout::set_stdout_logger},
 };
 
 mod fs;
@@ -66,7 +66,7 @@ pub async fn initialize_logging() -> Result<Option<SdkLoggerProvider>, Box<dyn s
     } else {
         tracing::warn!("No logging backend configured; falling back to stdout-only logging");
 
-        stdout_logger();
+        set_stdout_logger();
     }
 
     Ok(None)
