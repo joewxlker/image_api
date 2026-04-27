@@ -25,11 +25,11 @@ pub type SimpleLogger = Arc<
     >,
 >;
 
-/// Holds a cloneable stdout logger provider with the filter [ENV_FILTER]
+/// Holds a cloneable stdout logger subscriber using the env filter [ENV_FILTER].
 /// 
-/// ## Examples
+/// # Examples
 /// 
-/// ```rust
+/// ```rust,no_run
 /// # use tracing::instrument::WithSubscriber;
 /// # use platform::services::log_service::stdout::STDOUT_LOGGER;
 /// # use tracing::subscriber::with_default;
@@ -45,9 +45,8 @@ pub type SimpleLogger = Arc<
 /// # }
 /// 
 /// with_default(STDOUT_LOGGER.clone(), || {
-///     tracing::info!("This will log to the terminal")
+///     tracing::info!("This will log to the terminal");
 /// });
-/// 
 /// ```
 pub static STDOUT_LOGGER: LazyLock<SimpleLogger> = LazyLock::new(|| {
     let fmt_layer = tracing_subscriber::fmt::layer()
@@ -59,10 +58,12 @@ pub static STDOUT_LOGGER: LazyLock<SimpleLogger> = LazyLock::new(|| {
     Arc::new(registry)
 });
 
-/// Sets the global log subscriber to stdout with the filter [ENV_FILTER]
+/// Sets the global tracing subscriber to forward logs to stdout using the 
+/// env filter [ENV_FILTER].
 /// 
 /// # Panics
-/// Calling multiple 'global-subscriber' setting functions will panic 
+/// 
+/// - Calling multiple 'global-subscriber' setting functions will result in a panic 
 pub fn set_stdout_logger() {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
