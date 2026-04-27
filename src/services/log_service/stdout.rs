@@ -29,17 +29,21 @@ pub type SimpleLogger = Arc<
 /// 
 /// ## Examples
 /// ```rust
+/// # use tracing::instrument::WithSubscriber;
+/// # use platform::services::log_service::stdout::STDOUT_LOGGER;
+/// # use tracing::subscriber::with_default;
+/// 
 /// async fn some_async_task() {
 ///     tracing::info!("This will log to the terminal");
 /// }
 /// 
-/// // Async
+/// # async fn task() {
 /// some_async_task()
 ///     .with_subscriber(STDOUT_LOGGER.clone())
 ///     .await;
+/// # }
 /// 
-/// // Sync
-/// with_default(registry, || {
+/// with_default(STDOUT_LOGGER.clone(), || {
 ///     tracing::info!("This will log to the terminal")
 /// });
 /// 
