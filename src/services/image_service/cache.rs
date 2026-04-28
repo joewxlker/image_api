@@ -1,5 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::ErrorKind;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -12,26 +13,61 @@ use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGenerato
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
 #[archive_attr(derive(bytecheck::CheckBytes))]
 struct ImageCacheItem {
-    key: String,
+    key: ImageKey,
     bytes: Vec<u8>,
     height: u32,
     width: u32,
     index: u32,
 }
 
-pub fn image_key(index: u32, height: u32, width: u32) -> String {
-    let mut hasher = DefaultHasher::new();
+#[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
+#[archive_attr(derive(bytecheck::CheckBytes))]
+pub struct ImageKey(String);
 
-    index.hash(&mut hasher);
-    height.hash(&mut hasher);
-    width.hash(&mut hasher);
+impl Deref for ImageKey {
+    type Target = String;
 
-    format!("{:#x}", hasher.finish())
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<&ImageKey> for opentelemetry::Value {
+    fn from(value: &ImageKey) -> Self {
+        opentelemetry::Value::String(value.0.clone().into())
+    }
+}
+
+impl From<&ImageGenerationParams> for ImageKey {
+    fn from(value: &ImageGenerationParams) -> Self {
+        ImageKey::from(value.clone())
+    }
+}
+
+impl From<ImageGenerationParams> for ImageKey {
+    fn from(value: ImageGenerationParams) -> Self {
+        ImageKey::new(value.index, value.height, value.width)
+    }
+}
+
+impl ImageKey {
+    pub fn new(index: u32, height: u32, width: u32) -> Self {
+        let mut hasher = DefaultHasher::new();
+
+        index.hash(&mut hasher);
+        height.hash(&mut hasher);
+        width.hash(&mut hasher);
+
+        Self(format!("{:#x}", hasher.finish()))
+    }
+    pub fn into_inner(self) -> String {
+        self.0
+    }
 }
 
 impl ImageCacheItem {
     fn new(index: u32, height: u32, width: u32, bytes: &Vec<u8>) -> Self {
-        let key = image_key(index, height, width);
+        let key = ImageKey::new(index, height, width);
 
         Self {
             key,
@@ -176,8 +212,8 @@ impl MmapImageCache {
         height: u32,
         width: u32,
     ) -> Result<Option<Vec<u8>>, MmapImageCacheError> {
-        let key = image_key(index, height, width);
-        let path_prefix = self.path.join(&key);
+        let key = ImageKey::new(index, height, width);
+        let path_prefix = self.path.join(key.as_str());
         let mut synchronizer = Synchronizer::new(path_prefix.as_os_str());
 
         let archive = match self.read_archived_image(&mut synchronizer, &key).await? {
@@ -196,25 +232,25 @@ impl MmapImageCache {
         height: u32,
         width: u32,
     ) -> Result<ImageMetadata, MmapImageCacheError> {
-        let key = image_key(index, height, width);
-        let path_prefix = self.path.join(&key);
+        let key = ImageKey::new(index, height, width);
+        let path_prefix = self.path.join(key.as_str());
         let mut synchronizer = Synchronizer::new(path_prefix.as_os_str());
 
         match self.read_archived_image(&mut synchronizer, &key).await? {
-            Some(_) => Ok(ImageMetadata::new(index, key, true)),
-            None => Ok(ImageMetadata::new(index, key, false)),
+            Some(_) => Ok(ImageMetadata::new(index, key.into_inner(), true)),
+            None => Ok(ImageMetadata::new(index, key.into_inner(), false)),
         }
     }
     async fn read_archived_image<'a>(
         &'a self,
         synchronizer: &'a mut Synchronizer,
-        key: &String,
+        key: &ImageKey,
     ) -> Result<Option<TimedReadResult<ReadResult<'a, ImageCacheItem>>>, MmapImageCacheError> {
         let v = synchronizer.version();
         let read = match unsafe { synchronizer.read::<ImageCacheItem>(false) } {
             Ok(read) => {
                 tracing::trace!(
-                    key = key,
+                    key = key.as_str(),
                     is_switched = format!("{}", read.is_switched()),
                     version = format!(
                         "{:?}",
@@ -245,8 +281,8 @@ impl MmapImageCache {
         width: u32,
         bytes: &Vec<u8>,
     ) -> Result<(), MmapImageCacheError> {
-        let key = image_key(index, height, width);
-        let mut synchronizer = Synchronizer::new(self.path.join(key).as_os_str());
+        let key = ImageKey::new(index, height, width);
+        let mut synchronizer = Synchronizer::new(self.path.join(key.as_str()).as_os_str());
         let item = ImageCacheItem::new(index, height, width, bytes);
 
         synchronizer.write::<ImageCacheItem>(&item, GRACE_PERIOD)?;

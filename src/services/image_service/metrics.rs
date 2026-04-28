@@ -7,7 +7,7 @@ use opentelemetry::{
 use tracing::instrument;
 
 use crate::services::image_service::{
-    cache::{ImageCacheService, ImageCacheServiceResult, image_key},
+    cache::{ImageCacheService, ImageCacheServiceResult, ImageKey},
     client::ImageClientError,
     r#gen::ImageGenerationParams,
 };
@@ -78,7 +78,7 @@ impl ImageMetrics {
         &self,
         start: &Instant,
         req: ImageGenerationParams,
-        key: &str,
+        key: &ImageKey,
         result: &ImageCacheServiceResult,
     ) {
         let duration = start.elapsed().as_secs_f64();
@@ -113,13 +113,12 @@ impl ImageMetrics {
         &self,
         start: &Instant,
         req: ImageGenerationParams,
-        key: &str,
+        key: &ImageKey,
         err: &ImageClientError,
     ) {
         let duration = start.elapsed().as_secs_f64();
 
-        self.error_counter
-            .add(1, &[KeyValue::new("key", key.to_string())]);
+        self.error_counter.add(1, &[KeyValue::new("key", key)]);
 
         self.error_time.record(duration, &[]);
 
@@ -145,7 +144,7 @@ impl ImageMetricsService {
         params: ImageGenerationParams,
     ) -> Result<ImageCacheServiceResult, ImageClientError> {
         let metrics = self.metrics.clone();
-        let key = image_key(params.index, params.height, params.width);
+        let key = ImageKey::from(params);
         let start = Instant::now();
 
         match self.inner.handle(params).await {
