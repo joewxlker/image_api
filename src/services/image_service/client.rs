@@ -1,4 +1,4 @@
-use tower::{Layer, Service, ServiceBuilder};
+use tower::{Layer, ServiceBuilder};
 
 use crate::services::image_service::{
     cache::{
@@ -42,9 +42,9 @@ impl ImageClient {
 
     pub async fn image(
         &mut self,
-        req: ImageGenerationParams,
+        params: ImageGenerationParams,
     ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        self.inner.call(req).await
+        self.inner.handle(params).await
     }
 }
 

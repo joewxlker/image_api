@@ -1,7 +1,6 @@
 use image::{DynamicImage, ImageBuffer, Rgb, RgbImage};
 use jpeg_encoder::{ColorType, Encoder};
-use std::{f32::consts::PI, pin::Pin, task::Poll};
-use tower::Service;
+use std::f32::consts::PI;
 use validator::{Validate, ValidationErrors};
 
 use crate::services::image_service::client::ImageClientError;
@@ -347,21 +346,11 @@ impl ImageGeneratorService {
     }
 }
 
-impl Service<ImageGenerationParams> for ImageGeneratorService {
-    type Error = ImageClientError;
-    type Response = Vec<u8>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&mut self, req: ImageGenerationParams) -> Self::Future {
-        let generator = self.generator.clone();
-
-        Box::pin(async move {
-            let result = generator.generate(req.index, req.width, req.height).await;
-
-            result.map_err(ImageClientError::ImageGenError)
-        })
-    }
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+impl ImageGeneratorService {
+    pub async fn handle(&self, params: ImageGenerationParams) -> Result<Vec<u8>, ImageClientError> {
+        self.generator
+            .generate(params.index, params.width, params.height)
+            .await
+            .map_err(ImageClientError::ImageGenError)
     }
 }

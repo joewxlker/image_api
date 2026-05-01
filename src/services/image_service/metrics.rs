@@ -1,14 +1,9 @@
-use std::{
-    pin::Pin,
-    task::Poll,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use opentelemetry::{
     KeyValue, global,
     metrics::{Counter, Histogram},
 };
-use tower::Service;
 use tracing::instrument;
 
 use crate::services::image_service::{
@@ -144,33 +139,26 @@ impl ImageMetricsService {
     }
 }
 
-impl Service<ImageGenerationParams> for ImageMetricsService {
-    type Error = ImageClientError;
-    type Response = ImageCacheServiceResult;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&mut self, req: ImageGenerationParams) -> Self::Future {
-        let mut image_cache = self.inner.clone();
+impl ImageMetricsService {
+    pub async fn handle(
+        &self,
+        params: ImageGenerationParams,
+    ) -> Result<ImageCacheServiceResult, ImageClientError> {
         let metrics = self.metrics.clone();
-        let key = image_key(req.index, req.height, req.width);
+        let key = image_key(params.index, params.height, params.width);
         let start = Instant::now();
 
-        Box::pin(async move {
-            match image_cache.call(req).await {
-                Ok(result) => {
-                    metrics.success(&start, req, &key, &result);
+        match self.inner.handle(params).await {
+            Ok(result) => {
+                metrics.success(&start, params, &key, &result);
 
-                    Ok(result)
-                }
-                Err(err) => {
-                    metrics.error(&start, req, &key, &err);
-
-                    Err(err)
-                }
+                Ok(result)
             }
-        })
-    }
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+            Err(err) => {
+                metrics.error(&start, params, &key, &err);
+
+                Err(err)
+            }
+        }
     }
 }

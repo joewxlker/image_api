@@ -1,13 +1,10 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use mmap_sync::guard::ReadResult;
 use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
-use tower::Service;
 
 use crate::services::image_service::client::ImageClientError;
 use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGeneratorService};
@@ -278,6 +275,38 @@ impl ImageCacheService {
     }
 }
 
+impl ImageCacheService {
+    pub async fn handle(
+        &self,
+        params: ImageGenerationParams,
+    ) -> Result<ImageCacheServiceResult, ImageClientError> {
+        let read_result = self
+            .cache
+            .read_image_bytes(params.index, params.height, params.width)
+            .await
+            .map_err(ImageClientError::ImageCacheError)?;
+
+        if let Some(image_bytes) = read_result {
+            return Ok(ImageCacheServiceResult::Cached(image_bytes));
+        }
+
+        let image_bytes = self.inner.handle(params).await?;
+
+        let bytes = image_bytes.clone();
+        let cache = self.cache.clone();
+        tokio::task::spawn(async move {
+            if let Err(err) = cache
+                .store_image_bytes(params.index, params.height, params.width, &bytes)
+                .await
+            {
+                log::error!("Error occured while writing image to disk: {err}");
+            }
+        });
+
+        Ok(ImageCacheServiceResult::Generated(image_bytes))
+    }
+}
+
 #[derive(Debug)]
 pub enum ImageCacheServiceResult {
     Cached(Vec<u8>),
@@ -302,44 +331,5 @@ impl ImageCacheServiceResult {
             Self::Cached(bytes) => bytes.len() as u32,
             Self::Generated(bytes) => bytes.len() as u32,
         }
-    }
-}
-
-impl Service<ImageGenerationParams> for ImageCacheService {
-    type Error = ImageClientError;
-    type Response = ImageCacheServiceResult;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&mut self, req: ImageGenerationParams) -> Self::Future {
-        let cache = self.cache.clone();
-        let mut inner = self.inner.clone();
-
-        Box::pin(async move {
-            let read_result = cache
-                .read_image_bytes(req.index, req.height, req.width)
-                .await
-                .map_err(ImageClientError::ImageCacheError)?;
-
-            if let Some(image_bytes) = read_result {
-                return Ok(ImageCacheServiceResult::Cached(image_bytes));
-            }
-
-            let image_bytes = inner.call(req).await?;
-
-            let bytes = image_bytes.clone();
-            tokio::task::spawn(async move {
-                if let Err(err) = cache
-                    .store_image_bytes(req.index, req.height, req.width, &bytes)
-                    .await
-                {
-                    log::error!("Error occured while writing image to disk: {err}");
-                }
-            });
-
-            Ok(ImageCacheServiceResult::Generated(image_bytes))
-        })
-    }
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
     }
 }
