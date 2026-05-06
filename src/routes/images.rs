@@ -1,8 +1,5 @@
 use std::io::Cursor;
 
-#[cfg(feature = "channeled")]
-use {crate::util::channel_writer::non_blocking::ChannelWriter, rocket::response::stream::stream};
-
 use rocket::{
     Response, Route, State,
     http::{ContentType, Header, Status, hyper::header::CACHE_CONTROL},
@@ -20,6 +17,8 @@ use rocket::{
 use tracing::instrument;
 use validator::ValidationErrors;
 
+#[cfg(feature = "channeled")]
+use crate::actions::images::stream_image_action;
 use crate::services::image_service::{
     cache::{ImageMetadata, MmapImageCacheError},
     client::{ImageClient, ImageClientError},
@@ -29,19 +28,18 @@ use crate::services::image_service::{
 #[cfg(not(feature = "channeled"))]
 #[instrument(skip(image_client))]
 #[rocket::get("/<index>?<width>&<height>")]
-pub async fn get_image<'a>(
+pub async fn get_image(
     index: u32,
     width: u32,
     height: u32,
     image_client: &State<ImageClient>,
 ) -> Result<ImageBytes, ImageRouteError> {
+    use crate::actions::images::image_bytes_action;
+
     let dimensions = ImageGenerationParams::build(index, width, height)?;
+    let image_client = image_client.inner().clone();
 
-    let mut image_client = image_client.inner().clone();
-
-    let result = image_client.image(dimensions).await?;
-
-    Ok(ImageBytes(result.bytes_owned()))
+    image_bytes_action(dimensions, image_client).await
 }
 
 #[cfg(feature = "channeled")]
@@ -54,25 +52,9 @@ pub async fn get_image<'a>(
     image_client: &State<ImageClient>,
 ) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
     let dimensions = ImageGenerationParams::build(index, width, height)?;
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
-
     let image_client = image_client.inner().clone();
 
-    tokio::task::spawn(async move {
-        let mut writer = ChannelWriter::new(sender);
-
-        if let Err(err) = image_client.image_into(dimensions, &mut writer).await {
-            tracing::error!("Image streaming failed: {err}");
-        }
-    });
-
-    let stream = stream! {
-        while let Some(msg) = receiver.recv().await {
-            yield msg
-        }
-    };
-
-    Ok(ImageStream(stream))
+    Ok(stream_image_action(dimensions, image_client).await)
 }
 
 #[instrument(skip(image_client))]
@@ -101,7 +83,7 @@ pub enum ImageRouteError {
 }
 
 #[cfg(feature = "channeled")]
-pub struct ImageStream<S>(S);
+pub struct ImageStream<S>(pub S);
 
 #[cfg(feature = "channeled")]
 impl<'r, S: Stream> Responder<'r, 'r> for ImageStream<S>
@@ -123,7 +105,7 @@ where
 }
 
 #[cfg(not(feature = "channeled"))]
-pub struct ImageBytes(Vec<u8>);
+pub struct ImageBytes(pub Vec<u8>);
 
 #[cfg(not(feature = "channeled"))]
 impl<'a> Responder<'a, 'a> for ImageBytes {
