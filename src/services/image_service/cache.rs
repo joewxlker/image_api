@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 use mmap_sync::guard::ReadResult;
 use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
 
+#[cfg(feature = "channeled")]
+use {crate::util::tee_writer::non_blocking::TeeWriter, rocket::futures::AsyncWrite};
+
 use crate::services::image_service::client::ImageClientError;
 use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGeneratorService};
 
@@ -312,6 +315,7 @@ impl ImageCacheService {
 }
 
 impl ImageCacheService {
+    #[cfg(not(feature = "channeled"))]
     pub async fn handle(
         &self,
         params: ImageGenerationParams,
@@ -341,31 +345,81 @@ impl ImageCacheService {
 
         Ok(ImageCacheServiceResult::Generated(image_bytes))
     }
+
+    #[cfg(feature = "channeled")]
+    pub async fn handle_into<W>(
+        &self,
+        params: ImageGenerationParams,
+        mut writer: W,
+    ) -> Result<ImageCacheServiceResult, ImageClientError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        if let Some(image_bytes) = self
+            .cache
+            .read_image_bytes(params.index, params.height, params.width)
+            .await
+            .map_err(ImageClientError::ImageCacheError)?
+        {
+            use rocket::futures::AsyncWriteExt;
+
+            writer
+                .write_all(&image_bytes)
+                .await
+                .map_err(ImageClientError::WriterError)?;
+
+            return Ok(ImageCacheServiceResult::Cached(image_bytes));
+        }
+
+        let mut cache = vec![];
+        {
+            let mut t_writer = TeeWriter::new(writer, &mut cache);
+
+            self.inner.handle_into(params, &mut t_writer).await?;
+
+            // Dropping the writer here closes the stream
+        }
+
+        let size = cache.len();
+
+        let image_cache = self.cache.clone();
+        tokio::task::spawn(async move {
+            if let Err(err) = image_cache
+                .store_image_bytes(params.index, params.height, params.width, &cache)
+                .await
+            {
+                tracing::error!("Error occurred while writing image to disk: {err}");
+            }
+        });
+
+        Ok(ImageCacheServiceResult::Streamed(size))
+    }
 }
 
 #[derive(Debug)]
 pub enum ImageCacheServiceResult {
     Cached(Vec<u8>),
     Generated(Vec<u8>),
+
+    #[cfg(feature = "channeled")]
+    Streamed(usize),
 }
 
 impl ImageCacheServiceResult {
     pub fn is_cached(&self) -> bool {
-        match self {
-            Self::Cached(_) => return true,
-            _ => return false,
-        }
+        matches!(self, Self::Cached(_))
     }
+    #[cfg(not(feature = "channeled"))]
     pub fn bytes_owned(self) -> Vec<u8> {
         match self {
-            Self::Cached(bytes) => bytes,
-            Self::Generated(bytes) => bytes,
+            Self::Cached(bytes) |  Self::Generated(bytes) => bytes
         }
     }
     pub fn image_size(&self) -> u32 {
         match self {
-            Self::Cached(bytes) => bytes.len() as u32,
-            Self::Generated(bytes) => bytes.len() as u32,
+            Self::Cached(bytes) | Self::Generated(bytes) => bytes.len() as u32,
+            #[cfg(feature = "channeled")]
+            Self::Streamed(size) => *size as u32,
         }
     }
 }

@@ -1,4 +1,5 @@
 use tracing::instrument::WithSubscriber;
+use tracing::subscriber::with_default;
 
 use platform::config::IMAGE_CACHE_DIRECTORY;
 use platform::middleware::cors::CORS;
@@ -32,6 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MmapImageCache::from_static_path(&IMAGE_CACHE_DIRECTORY)?,
         ImageMetrics::new(),
     );
+
+    #[cfg(feature = "channeled")]
+    with_default(STDOUT_LOGGER.clone(), || {
+        tracing::info!("Image channeling enabled");
+    });
+
+    #[cfg(not(feature = "channeled"))]
+    with_default(STDOUT_LOGGER.clone(), || {
+        tracing::info!("Image channeling disabled");
+    });
 
     // Rocket
     rocket::Rocket::build()

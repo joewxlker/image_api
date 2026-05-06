@@ -4,6 +4,10 @@ use opentelemetry::{
     KeyValue, global,
     metrics::{Counter, Histogram},
 };
+
+#[cfg(feature = "channeled")]
+use rocket::futures::AsyncWrite;
+
 use tracing::instrument;
 
 use crate::services::image_service::{
@@ -139,6 +143,7 @@ impl ImageMetricsService {
 }
 
 impl ImageMetricsService {
+    #[cfg(not(feature = "channeled"))]
     pub async fn handle(
         &self,
         params: ImageGenerationParams,
@@ -155,6 +160,32 @@ impl ImageMetricsService {
             }
             Err(err) => {
                 metrics.error(&start, params, &key, &err);
+
+                Err(err)
+            }
+        }
+    }
+
+    #[cfg(feature = "channeled")]
+    pub async fn handle_into<W>(
+        &self,
+        params: ImageGenerationParams,
+        writer: &mut W,
+    ) -> Result<ImageCacheServiceResult, ImageClientError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let key = ImageKey::from(params);
+        let start = Instant::now();
+
+        match self.inner.handle_into(params, writer).await {
+            Ok(result) => {
+                self.metrics.success(&start, params, &key, &result);
+
+                Ok(result)
+            }
+            Err(err) => {
+                self.metrics.error(&start, params, &key, &err);
 
                 Err(err)
             }

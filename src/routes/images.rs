@@ -1,11 +1,20 @@
 use std::io::Cursor;
 
+#[cfg(feature = "channeled")]
+use {crate::util::channel_writer::non_blocking::ChannelWriter, rocket::response::stream::stream};
+
 use rocket::{
     Response, Route, State,
     http::{ContentType, Header, Status, hyper::header::CACHE_CONTROL},
     response::{self, Responder},
     routes,
     serde::json::Json,
+};
+
+#[cfg(feature = "channeled")]
+use rocket::{
+    futures::{Stream, StreamExt},
+    response::stream::ReaderStream,
 };
 
 use tracing::instrument;
@@ -17,6 +26,7 @@ use crate::services::image_service::{
     r#gen::ImageGenerationParams,
 };
 
+#[cfg(not(feature = "channeled"))]
 #[instrument(skip(image_client))]
 #[rocket::get("/<index>?<width>&<height>")]
 pub async fn get_image<'a>(
@@ -28,9 +38,41 @@ pub async fn get_image<'a>(
     let dimensions = ImageGenerationParams::build(index, width, height)?;
 
     let mut image_client = image_client.inner().clone();
+
     let result = image_client.image(dimensions).await?;
 
     Ok(ImageBytes(result.bytes_owned()))
+}
+
+#[cfg(feature = "channeled")]
+#[instrument(skip(image_client))]
+#[rocket::get("/<index>?<width>&<height>")]
+pub async fn get_image<'a>(
+    index: u32,
+    width: u32,
+    height: u32,
+    image_client: &State<ImageClient>,
+) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
+    let dimensions = ImageGenerationParams::build(index, width, height)?;
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+
+    let image_client = image_client.inner().clone();
+
+    tokio::task::spawn(async move {
+        let mut writer = ChannelWriter::new(sender);
+
+        if let Err(err) = image_client.image_into(dimensions, &mut writer).await {
+            tracing::error!("Image streaming failed: {err}");
+        }
+    });
+
+    let stream = stream! {
+        while let Some(msg) = receiver.recv().await {
+            yield msg
+        }
+    };
+
+    Ok(ImageStream(stream))
 }
 
 #[instrument(skip(image_client))]
@@ -58,8 +100,32 @@ pub enum ImageRouteError {
     ImageClientError(#[from] ImageClientError),
 }
 
+#[cfg(feature = "channeled")]
+pub struct ImageStream<S>(S);
+
+#[cfg(feature = "channeled")]
+impl<'r, S: Stream> Responder<'r, 'r> for ImageStream<S>
+where
+    S: Send + 'r,
+    S::Item: AsRef<[u8]> + Send + Unpin + 'r,
+{
+    fn respond_to(self, _: &'r rocket::Request<'_>) -> response::Result<'r> {
+        Response::build()
+            .header(ContentType::JPEG)
+            .header(Header::new(
+                CACHE_CONTROL.as_str(),
+                "public, max-age=31536000, immutable",
+            ))
+            .status(Status::Ok)
+            .streamed_body(ReaderStream::from(self.0.map(std::io::Cursor::new)))
+            .ok()
+    }
+}
+
+#[cfg(not(feature = "channeled"))]
 pub struct ImageBytes(Vec<u8>);
 
+#[cfg(not(feature = "channeled"))]
 impl<'a> Responder<'a, 'a> for ImageBytes {
     fn respond_to(self, _: &'a rocket::Request<'_>) -> response::Result<'a> {
         Response::build()

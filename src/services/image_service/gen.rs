@@ -1,7 +1,13 @@
 use image::{DynamicImage, ImageBuffer, Rgb, RgbImage};
-use jpeg_encoder::{ColorType, Encoder};
+use jpeg_encoder::{ColorType, Encoder, EncodingError};
 use std::f32::consts::PI;
 use validator::{Validate, ValidationErrors};
+
+#[cfg(feature = "channeled")]
+use {
+    crate::util::channel_writer::blocking::ChannelWriter,
+    rocket::futures::{AsyncWrite, AsyncWriteExt},
+};
 
 use crate::services::image_service::client::ImageClientError;
 
@@ -231,7 +237,10 @@ impl Chunk {
     }
 }
 
-fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> std::io::Result<Vec<u8>> {
+#[cfg(not(feature = "channeled"))]
+fn encode_progressive(
+    img: ImageBuffer<Rgb<u8>, Vec<u8>>,
+) -> Result<Vec<u8>, ImageGeneratorError> {
     let dyn_img = DynamicImage::ImageRgb8(img);
 
     let mut out = Vec::new();
@@ -240,16 +249,50 @@ fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> std::io::Result<Vec
     encoder.set_progressive(true);
 
     let rgb = dyn_img.to_rgb8();
-    encoder
-        .encode(
+    encoder.encode(
+        rgb.as_raw(),
+        rgb.width() as u16,
+        rgb.height() as u16,
+        ColorType::Rgb,
+    )?;
+
+    Ok(out)
+}
+
+#[cfg(feature = "channeled")]
+async fn encode_progressive_into<W>(
+    img: ImageBuffer<Rgb<u8>, Vec<u8>>,
+    out: &mut W,
+) -> Result<(), ImageGeneratorError>
+where
+    W: AsyncWrite + Unpin,
+{
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    let mut writer = ChannelWriter::new(sender);
+
+    let handle = tokio::task::spawn_blocking(move || {
+        let mut encoder = Encoder::new(&mut writer, 95);
+        encoder.set_progressive(true);
+
+        let dyn_img = DynamicImage::ImageRgb8(img);
+        let rgb = dyn_img.to_rgb8();
+        encoder.encode(
             rgb.as_raw(),
             rgb.width() as u16,
             rgb.height() as u16,
             ColorType::Rgb,
-        )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        )?;
 
-    Ok(out)
+        Ok::<(), ImageGeneratorError>(())
+    });
+
+    while let Some(data) = receiver.recv().await {
+        out.write_all(&data).await?;
+    }
+
+    handle.await.map_err(|_| ImageGeneratorError::JoinError)??;
+
+    Ok(())
 }
 
 const MAX_HEIGHT: u32 = 2000;
@@ -288,12 +331,12 @@ impl ImageGenerator {
 }
 
 impl ImageGenerator {
-    pub async fn generate(
+    async fn generate_rgb_image(
         &self,
         index: u32,
         width: u32,
         height: u32,
-    ) -> Result<Vec<u8>, ImageGeneratorError> {
+    ) -> Result<RgbImage, ImageGeneratorError> {
         let qtr = height / 4;
 
         let chunks = vec![
@@ -321,12 +364,40 @@ impl ImageGenerator {
             }
         }
 
-        Ok(encode_progressive(img)?)
+        Ok(img)
+    }
+    #[cfg(not(feature = "channeled"))]
+    pub async fn jpeg_progressive(
+        &self,
+        params: ImageGenerationParams,
+    ) -> Result<Vec<u8>, ImageGeneratorError> {
+        let image = self
+            .generate_rgb_image(params.index, params.width, params.height)
+            .await?;
+
+        encode_progressive(image)
+    }
+    #[cfg(feature = "channeled")]
+    pub async fn jpeg_progressive_into<W>(
+        &self,
+        params: ImageGenerationParams,
+        writer: &mut W,
+    ) -> Result<(), ImageGeneratorError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let image = self
+            .generate_rgb_image(params.index, params.width, params.height)
+            .await?;
+
+        encode_progressive_into(image, writer).await
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ImageGeneratorError {
+    #[error("EncodingError: {0}")]
+    EncodingError(#[from] EncodingError),
     #[error("ImageError: {0}")]
     ImageError(#[from] image::ImageError),
     #[error("Unhandled IoError: {0}")]
@@ -347,9 +418,25 @@ impl ImageGeneratorService {
 }
 
 impl ImageGeneratorService {
+    #[cfg(not(feature = "channeled"))]
     pub async fn handle(&self, params: ImageGenerationParams) -> Result<Vec<u8>, ImageClientError> {
         self.generator
-            .generate(params.index, params.width, params.height)
+            .jpeg_progressive(params)
+            .await
+            .map_err(ImageClientError::ImageGenError)
+    }
+
+    #[cfg(feature = "channeled")]
+    pub async fn handle_into<W>(
+        &self,
+        params: ImageGenerationParams,
+        writer: &mut W,
+    ) -> Result<(), ImageClientError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        self.generator
+            .jpeg_progressive_into(params, writer)
             .await
             .map_err(ImageClientError::ImageGenError)
     }

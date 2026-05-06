@@ -1670,6 +1670,7 @@ dependencies = [
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pin-project",
  "rand 0.10.0",
  "regex",
  "reqwest 0.13.2",

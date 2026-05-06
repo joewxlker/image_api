@@ -3,6 +3,10 @@ name = "platform"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+channeled = ["dep:pin-project"]
+
 [dependencies]
 rocket = { version = "0.5.1", features = ["json"]}
 tokio = { version = "1.50.0", features = ["full"] }
@@ -36,3 +40,4 @@ url = { version = "2.5.8", features = ["serde"] }
 opentelemetry-appender-tracing = "0.31.1"
 reqwest = "0.13.2"
 lazy_static = "1.5.0"
+pin-project = { version = "1.1.11", optional = true }
