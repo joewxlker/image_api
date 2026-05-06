@@ -54,5 +54,7 @@ pub async fn image_bytes_action(
     dimensions: ImageGenerationParams,
     mut image_client: ImageClient,
 ) -> Result<ImageBytes, ImageRouteError> {
+    let result = image_client.image(dimensions).await?;
 
+    Ok(ImageBytes(result.bytes_owned()))
 }
