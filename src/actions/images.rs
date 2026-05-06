@@ -1,12 +1,12 @@
 #[cfg(feature = "channeled")]
 use {
-    crate::{services::image_service::{client::{ImageClient, ImageClientError}, r#gen::ImageGenerationParams}, util::channel_writer::non_blocking::ChannelWriter}, rocket::{futures::Stream, response::stream}, tokio::task::JoinHandle
+    crate::{services::image_service::{cache::ImageCacheServiceResult, client::{ImageClient, ImageClientError}, r#gen::ImageGenerationParams}, util::channel_writer::non_blocking::ChannelWriter}, rocket::{futures::Stream, response::stream}, tokio::task::JoinHandle
 };
 
 #[cfg(feature = "channeled")]
 pub struct ImageStreaming<S> {
     pub stream: S,
-    pub finished: JoinHandle<Result<(), ImageClientError>>
+    pub finished: JoinHandle<Result<ImageCacheServiceResult, ImageClientError>>
 }
 
 #[cfg(feature = "channeled")]
@@ -19,13 +19,7 @@ pub async fn stream_image_action(
     let finished = tokio::task::spawn(async move {
         let mut writer = ChannelWriter::new(sender);
 
-        if let Err(err) = image_client.image_into(dimensions, &mut writer).await {
-            tracing::error!("Image streaming failed: {err}");
-
-            return Err(err)
-        }
-
-        Ok(())
+        image_client.image_into(dimensions, &mut writer).await
     });
 
     let stream = stream::stream! {
