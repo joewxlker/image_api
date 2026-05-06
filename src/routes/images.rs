@@ -53,8 +53,9 @@ pub async fn get_image<'a>(
 ) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
     let dimensions = ImageGenerationParams::build(index, width, height)?;
     let image_client = image_client.inner().clone();
+    let image_streaming = stream_image_action(dimensions, image_client).await;
 
-    Ok(stream_image_action(dimensions, image_client).await)
+    Ok(ImageStream(image_streaming.stream))
 }
 
 #[instrument(skip(image_client))]
