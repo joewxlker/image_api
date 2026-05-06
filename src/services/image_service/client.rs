@@ -45,7 +45,7 @@ impl ImageClient {
 
     #[cfg(not(feature = "channeled"))]
     pub async fn image(
-        &mut self,
+        &self,
         params: ImageGenerationParams,
     ) -> Result<ImageCacheServiceResult, ImageClientError> {
         self.inner.handle(params).await

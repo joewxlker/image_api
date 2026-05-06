@@ -35,7 +35,7 @@ pub async fn get_image(
     image_client: &State<ImageClient>,
 ) -> Result<ImageBytes, ImageRouteError> {
     let dimensions = ImageGenerationParams::build(index, width, height)?;
-    let mut image_client = image_client.inner().clone();
+    let image_client = image_client.inner().clone();
 
     let result = image_client.image(dimensions).await?;
 
