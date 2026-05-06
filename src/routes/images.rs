@@ -34,12 +34,12 @@ pub async fn get_image(
     height: u32,
     image_client: &State<ImageClient>,
 ) -> Result<ImageBytes, ImageRouteError> {
-    use crate::actions::images::image_bytes_action;
-
     let dimensions = ImageGenerationParams::build(index, width, height)?;
-    let image_client = image_client.inner().clone();
+    let mut image_client = image_client.inner().clone();
 
-    image_bytes_action(dimensions, image_client).await
+    let result = image_client.image(dimensions).await?;
+
+    Ok(ImageBytes(result.bytes_owned()))
 }
 
 #[cfg(feature = "channeled")]

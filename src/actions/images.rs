@@ -1,16 +1,7 @@
 #[cfg(feature = "channeled")]
 use {
-    tokio::task::JoinHandle,
-    rocket::response::stream,
-    rocket::futures::Stream,
-    crate::util::channel_writer::non_blocking::ChannelWriter,
-    crate::{services::image_service::client::ImageClientError}
+    crate::{services::image_service::{client::{ImageClient, ImageClientError}, r#gen::ImageGenerationParams}, util::channel_writer::non_blocking::ChannelWriter}, rocket::{futures::Stream, response::stream}, tokio::task::JoinHandle
 };
-
-#[cfg(not(feature = "channeled"))]
-use crate::routes::images::{ImageBytes, ImageRouteError};
-
-use crate::{services::image_service::{client::ImageClient, r#gen::ImageGenerationParams}};
 
 #[cfg(feature = "channeled")]
 pub struct ImageStreaming<S> {
@@ -47,14 +38,4 @@ pub async fn stream_image_action(
         stream,
         finished 
     }
-}
-
-#[cfg(not(feature = "channeled"))]
-pub async fn image_bytes_action(
-    dimensions: ImageGenerationParams,
-    mut image_client: ImageClient,
-) -> Result<ImageBytes, ImageRouteError> {
-    let result = image_client.image(dimensions).await?;
-
-    Ok(ImageBytes(result.bytes_owned()))
 }
