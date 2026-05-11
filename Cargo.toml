@@ -8,6 +8,29 @@ default = ["channeled"]
 buffered = []
 channeled = ["dep:pin-project"]
 
+[dev-dependencies]
+criterion = { version = "0.3", features = ["async_tokio"] }
+
+[[bench]]
+name = "encode_progressive_into"
+harness = false
+required-features = ["channeled"]
+
+[[bench]]
+name = "tee_writer"
+harness = false
+required-features = ["channeled"]
+
+[[bench]]
+name = "stream_image_action"
+harness = false
+required-features = ["channeled"]
+
+[[bench]]
+name = "get_image_action"
+harness = false
+required-features = ["buffered"]
+
 [dependencies]
 rocket = { version = "0.5.1", features = ["json"]}
 tokio = { version = "1.50.0", features = ["full"] }
