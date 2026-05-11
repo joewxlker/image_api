@@ -131,7 +131,12 @@ pub mod non_blocking {
 
         impl<W: AsyncWrite + Unpin> MockedBackPressureWriter<W> {
             pub fn new(inner: W) -> Self {
-                Self { write_count: 0, flush_count: 0, close_count: 0, inner }
+                Self {
+                    write_count: 0,
+                    flush_count: 0,
+                    close_count: 0,
+                    inner,
+                }
             }
         }
 
@@ -196,13 +201,22 @@ pub mod non_blocking {
                 _: &mut Context<'_>,
                 _: &[u8],
             ) -> Poll<std::io::Result<usize>> {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "mock_error")))
+                Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "mock_error",
+                )))
             }
             fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "mock_error")))
+                Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "mock_error",
+                )))
             }
             fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "mock_error")))
+                Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "mock_error",
+                )))
             }
         }
 
