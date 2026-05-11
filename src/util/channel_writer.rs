@@ -14,6 +14,10 @@ pub mod blocking {
 
     impl io::Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.is_empty() {
+                return Ok(0);
+            }
+
             let size = buf.len();
 
             self.sender
