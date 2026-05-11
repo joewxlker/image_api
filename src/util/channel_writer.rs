@@ -2,17 +2,17 @@
 pub mod blocking {
     use std::io;
 
-    pub struct ChannelWriter<T> {
-        sender: T,
+    pub struct ChannelWriter {
+        sender: tokio::sync::mpsc::Sender<Vec<u8>>,
     }
 
-    impl<T> ChannelWriter<T> {
-        pub fn new(sender: T) -> Self {
+    impl ChannelWriter {
+        pub fn new(sender: tokio::sync::mpsc::Sender<Vec<u8>>) -> Self {
             Self { sender }
         }
     }
 
-    impl io::Write for ChannelWriter<tokio::sync::mpsc::Sender<Vec<u8>>> {
+    impl io::Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let size = buf.len();
 
@@ -22,22 +22,7 @@ pub mod blocking {
 
             Ok(size)
         }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl io::Write for ChannelWriter<std::sync::mpsc::Sender<Vec<u8>>> {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let size = buf.len();
-
-            self.sender
-                .send(buf.to_vec())
-                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "send failed"))?;
-
-            Ok(size)
-        }
-        fn flush(&mut self) -> io::Result<()> {
+        fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
