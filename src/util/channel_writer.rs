@@ -30,6 +30,134 @@ pub mod blocking {
             Ok(())
         }
     }
+
+    #[cfg(test)]
+    mod test {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        use super::*;
+        use std::io::Write;
+        use std::time::Duration;
+
+        #[tokio::test]
+        async fn write_empty_buffer_returns_zero_and_sends_nothing() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn_blocking(move || {
+                let written = writer.write(b"").unwrap();
+
+                assert_eq!(written, 0);
+                matches!(receiver.try_recv(), Err(TryRecvError::Empty));
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn write_sends_buffer_and_returns_length() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let written = tokio::task::spawn_blocking(move || writer.write(b"hello"))
+                .await
+                .expect("blocking task panicked")
+                .unwrap();
+
+            assert_eq!(written, 5);
+            assert_eq!(receiver.recv().await.unwrap(), b"hello");
+        }
+
+        #[tokio::test]
+        async fn write_copies_buffer_contents() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let mut buf = b"hello".to_vec();
+
+            let written = tokio::task::spawn_blocking(move || {
+                let result = writer.write(&buf);
+                buf.fill(b'x');
+                result
+            })
+            .await
+            .expect("blocking task panicked")
+            .unwrap();
+
+            assert_eq!(written, 5);
+            assert_eq!(receiver.recv().await.unwrap(), b"hello");
+        }
+
+        #[tokio::test]
+        async fn multiple_writes_preserve_order() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn_blocking(move || {
+                writer.write_all(b"one")?;
+                writer.write_all(b"two")?;
+                writer.write_all(b"three")?;
+
+                Ok::<(), std::io::Error>(())
+            })
+            .await
+            .expect("blocking task panicked")
+            .unwrap();
+
+            assert_eq!(receiver.recv().await.unwrap(), b"one");
+            assert_eq!(receiver.recv().await.unwrap(), b"two");
+            assert_eq!(receiver.recv().await.unwrap(), b"three");
+            assert!(receiver.recv().await.is_none());
+        }
+
+        #[tokio::test]
+        async fn write_returns_broken_pipe_when_receiver_is_dropped() {
+            let (sender, _) = tokio::sync::mpsc::channel(1);
+
+            let mut writer = ChannelWriter::new(sender);
+
+            let error = tokio::task::spawn_blocking(move || writer.write_all(b"hello"))
+                .await
+                .expect("blocking task panicked")
+                .unwrap_err();
+
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        }
+
+        #[tokio::test]
+        async fn flush_is_noop() {
+            let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn_blocking(move || writer.flush())
+                .await
+                .expect("blocking task panicked")
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn write_blocks_until_capacity_is_available() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let handle = tokio::task::spawn_blocking(move || {
+                writer.write_all(b"first")?;
+                writer.write_all(b"second")?;
+
+                Ok::<(), std::io::Error>(())
+            });
+
+            // wait for first write to fill the buffer and second write to block
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!handle.is_finished());
+
+            assert_eq!(receiver.recv().await.unwrap(), b"first");
+
+            handle.await.expect("blocking task panicked").unwrap();
+
+            assert_eq!(receiver.recv().await.unwrap(), b"second");
+        }
+    }
 }
 
 #[cfg(feature = "channeled")]
@@ -118,6 +246,134 @@ pub mod non_blocking {
             project.sender.take();
 
             Poll::Ready(Ok(()))
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use rocket::futures::AsyncWriteExt;
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        use super::*;
+        use std::time::Duration;
+
+        #[tokio::test]
+        async fn write_empty_buffer_returns_zero_and_sends_nothing() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn(async move {
+                let written = writer.write(b"").await.unwrap();
+
+                assert_eq!(written, 0);
+                matches!(receiver.try_recv(), Err(TryRecvError::Empty));
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn write_sends_buffer_and_returns_length() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let written = tokio::task::spawn(async move { writer.write(b"hello").await })
+                .await
+                .expect("blocking task panicked")
+                .unwrap();
+
+            assert_eq!(written, 5);
+            assert_eq!(receiver.recv().await.unwrap(), b"hello");
+        }
+
+        #[tokio::test]
+        async fn write_copies_buffer_contents() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let mut buf = b"hello".to_vec();
+
+            let written = tokio::task::spawn(async move {
+                let result = writer.write(&buf).await;
+                buf.fill(b'x');
+                result
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(written, 5);
+            assert_eq!(receiver.recv().await.unwrap(), b"hello");
+        }
+
+        #[tokio::test]
+        async fn multiple_writes_preserve_order() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn(async move {
+                writer.write_all(b"one").await?;
+                writer.write_all(b"two").await?;
+                writer.write_all(b"three").await?;
+
+                Ok::<(), std::io::Error>(())
+            })
+            .await
+            .expect("blocking task panicked")
+            .unwrap();
+
+            assert_eq!(receiver.recv().await.unwrap(), b"one");
+            assert_eq!(receiver.recv().await.unwrap(), b"two");
+            assert_eq!(receiver.recv().await.unwrap(), b"three");
+            assert!(receiver.recv().await.is_none());
+        }
+
+        #[tokio::test]
+        async fn write_returns_broken_pipe_when_receiver_is_dropped() {
+            let (sender, _) = tokio::sync::mpsc::channel(1);
+
+            let mut writer = ChannelWriter::new(sender);
+
+            let error = tokio::task::spawn(async move { writer.write_all(b"hello").await })
+                .await
+                .expect("blocking task panicked")
+                .unwrap_err();
+
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        }
+
+        #[tokio::test]
+        async fn flush_is_noop() {
+            let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            tokio::task::spawn(async move { writer.flush().await })
+                .await
+                .expect("blocking task panicked")
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn write_blocks_until_capacity_is_available() {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+            let mut writer = ChannelWriter::new(sender);
+
+            let handle = tokio::task::spawn(async move {
+                writer.write_all(b"first").await?;
+                writer.write_all(b"second").await?;
+
+                Ok::<(), std::io::Error>(())
+            });
+
+            // wait for first write to fill the buffer and second write to block
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!handle.is_finished());
+
+            assert_eq!(receiver.recv().await.unwrap(), b"first");
+
+            handle.await.expect("blocking task panicked").unwrap();
+
+            assert_eq!(receiver.recv().await.unwrap(), b"second");
         }
     }
 }
