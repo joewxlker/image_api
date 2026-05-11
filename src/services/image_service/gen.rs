@@ -4,12 +4,11 @@ use std::f32::consts::PI;
 use validator::{Validate, ValidationErrors};
 
 #[cfg(feature = "channeled")]
-use {
-    crate::util::channel_writer::blocking::ChannelWriter,
-    rocket::futures::{AsyncWrite, AsyncWriteExt},
-};
+use rocket::futures::{AsyncWrite, AsyncWriteExt};
 
 use crate::services::image_service::client::ImageClientError;
+#[cfg(feature = "channeled")]
+use crate::util::channel_writer::blocking::ChannelWriter;
 
 fn hash32(mut n: u32) -> u32 {
     n = (n ^ (n >> 15)).wrapping_mul(0x85eb_ca6b);
@@ -265,8 +264,9 @@ async fn encode_progressive_into<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
-    let mut writer = ChannelWriter::new(sender);
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    let channel_writer = ChannelWriter::new(sender);
+    let mut writer = std::io::BufWriter::with_capacity(256 * 1024, channel_writer);
 
     let handle = tokio::task::spawn_blocking(move || {
         let mut encoder = Encoder::new(&mut writer, 95);
