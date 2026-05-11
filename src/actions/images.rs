@@ -1,6 +1,7 @@
 #[cfg(feature = "channeled")]
 use {
     crate::{
+        config::IMAGE_ROUTE_HANDLER_QUEUE_SIZE,
         services::image_service::{
             cache::ImageCacheServiceResult,
             client::{ImageClient, ImageClientError},
@@ -23,7 +24,8 @@ pub async fn stream_image_action(
     dimensions: ImageGenerationParams,
     image_client: ImageClient,
 ) -> ImageStreaming<impl Stream<Item = Vec<u8>>> {
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    let buffer = *IMAGE_ROUTE_HANDLER_QUEUE_SIZE;
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(buffer);
 
     let finished = tokio::task::spawn(async move {
         let mut writer = ChannelWriter::new(sender);

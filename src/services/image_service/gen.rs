@@ -6,9 +6,15 @@ use validator::{Validate, ValidationErrors};
 #[cfg(feature = "channeled")]
 use rocket::futures::{AsyncWrite, AsyncWriteExt};
 
-use crate::services::image_service::client::ImageClientError;
 #[cfg(feature = "channeled")]
-use crate::util::channel_writer::blocking::ChannelWriter;
+use crate::{
+    config::{IMAGE_CHUNK_SIZE, IMAGE_ENCODER_QUEUE_SIZE, IMAGE_ENCODING_QUALITY},
+    util::channel_writer::blocking::ChannelWriter,
+};
+use crate::{
+    config::{MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH},
+    services::image_service::client::ImageClientError,
+};
 
 fn hash32(mut n: u32) -> u32 {
     n = (n ^ (n >> 15)).wrapping_mul(0x85eb_ca6b);
@@ -264,12 +270,16 @@ async fn encode_progressive_into<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    let buffer = *IMAGE_ENCODER_QUEUE_SIZE;
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(buffer);
     let channel_writer = ChannelWriter::new(sender);
-    let mut writer = std::io::BufWriter::with_capacity(256 * 1024, channel_writer);
+    let capacity = *IMAGE_CHUNK_SIZE;
+    let mut writer = std::io::BufWriter::with_capacity(capacity, channel_writer);
 
     let handle = tokio::task::spawn_blocking(move || {
-        let mut encoder = Encoder::new(&mut writer, 95);
+        let quality = *IMAGE_ENCODING_QUALITY;
+        let mut encoder = Encoder::new(&mut writer, quality);
+
         encoder.set_progressive(true);
 
         let dyn_img = DynamicImage::ImageRgb8(img);
@@ -293,14 +303,11 @@ where
     Ok(())
 }
 
-const MAX_HEIGHT: u32 = 2000;
-const MAX_WIDTH: u32 = 2000;
-
 #[derive(Copy, Clone, Debug, Validate)]
 pub struct ImageGenerationParams {
-    #[validate(range(min = 1, max = MAX_HEIGHT))]
+    #[validate(range(min = 1, max = *MAX_IMAGE_HEIGHT))]
     pub height: u32,
-    #[validate(range(min = 1, max = MAX_WIDTH))]
+    #[validate(range(min = 1, max = *MAX_IMAGE_WIDTH))]
     pub width: u32,
     pub index: u32,
 }

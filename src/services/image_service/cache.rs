@@ -10,6 +10,7 @@ use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
 #[cfg(feature = "channeled")]
 use {crate::util::tee_writer::non_blocking::TeeWriter, rocket::futures::AsyncWrite};
 
+use crate::config::IMAGE_CACHE_GRACE_DURATION;
 use crate::services::image_service::client::ImageClientError;
 use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGeneratorService};
 
@@ -163,12 +164,10 @@ pub enum MmapImageCacheFromPathError {
     },
 }
 
-const GRACE_PERIOD: Duration = Duration::from_millis(10);
-
 pub struct TimedReadResult<T> {
     inner: T,
     started_at: Instant,
-    grace_period: Duration,
+    grace_duration: Duration,
 }
 
 impl<T> TimedReadResult<T> {
@@ -176,7 +175,7 @@ impl<T> TimedReadResult<T> {
         Self {
             inner,
             started_at: Instant::now(),
-            grace_period: GRACE_PERIOD,
+            grace_duration: *IMAGE_CACHE_GRACE_DURATION,
         }
     }
 }
@@ -198,11 +197,11 @@ impl<T> std::ops::DerefMut for TimedReadResult<T> {
 impl<T> Drop for TimedReadResult<T> {
     fn drop(&mut self) {
         let elapsed = self.started_at.elapsed();
-        if elapsed > self.grace_period {
+        if elapsed > self.grace_duration {
             tracing::warn!(
                 elapsed_ms = elapsed.as_millis(),
-                grace_ms = self.grace_period.as_millis(),
-                "ReadResult was held longer than GRACE_PERIOD"
+                grace_ms = self.grace_duration.as_millis(),
+                "ReadResult was held longer than IMAGE_CACHE_GRACE_DURATION"
             );
         }
     }
@@ -287,8 +286,8 @@ impl MmapImageCache {
         let key = ImageKey::new(index, height, width);
         let mut synchronizer = Synchronizer::new(self.path.join(key.as_str()).as_os_str());
         let item = ImageCacheItem::new(index, height, width, bytes);
-
-        synchronizer.write::<ImageCacheItem>(&item, GRACE_PERIOD)?;
+        let grace_duration = *IMAGE_CACHE_GRACE_DURATION;
+        synchronizer.write::<ImageCacheItem>(&item, grace_duration)?;
 
         Ok(())
     }
