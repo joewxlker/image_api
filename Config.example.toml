@@ -1,17 +1,36 @@
-# Example configuration - copy to config.toml or similar and customize
+# Example configuration - copy to config.toml and customize as needed
+
 [default.package]
 name = "platform"
 version = "0.1.0"
 
 [default.otlp]
 instance_id = "your-instance-name"          # e.g. "production-server-01"
-collect_logs = true
-collect_metrics = true
+
+collect_logs = true                         # enable OpenTelemetry log export
+logs_endpoint = "http://localhost:4318/v1/logs"
+
+collect_metrics = true                      # enable OpenTelemetry metrics export
 metrics_endpoint = "http://localhost:4318/v1/metrics"
-logs_endpoint = "http://localhost:4318/v1/metrics"
+
+[default.image_cache]
+grace_period_ms = 50                        # how long an archive may be held before being dropped (milliseconds)
+
+[default.image_transport]
+encoder_queue_size = 1024                   # buffer capacity for encoded image data
+route_handler_queue_size = 1024             # buffer capacity for outbound image data
+chunk_size = 65536                          # size of each transmitted image chunk in bytes (64 KB)
+
+[default.image_encoding]
+quality = 85                                # image compression quality (1-100)
+max_height = 1080                           # maximum allowed image height
+max_width = 1920                            # maximum allowed image width
+
+[default.benchmark.tee_writer]
+message_size = 65536                        # benchmark payload/message size in bytes
 
 [default]
 environment = "local"                       # local | staging | production
-log_directory = "./logs"
-log_to_file = true
-image_cache_directory = "./cache/images"
+log_directory = "./logs"                    # directory where logs are written
+log_to_file = true                          # write logs to file in addition to stdout
+image_cache_directory = "./cache/images"    # directory used for cached images
