@@ -238,9 +238,7 @@ impl Chunk {
 }
 
 #[cfg(not(feature = "channeled"))]
-fn encode_progressive(
-    img: ImageBuffer<Rgb<u8>, Vec<u8>>,
-) -> Result<Vec<u8>, ImageGeneratorError> {
+fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<Vec<u8>, ImageGeneratorError> {
     let dyn_img = DynamicImage::ImageRgb8(img);
 
     let mut out = Vec::new();

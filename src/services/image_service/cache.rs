@@ -412,7 +412,7 @@ impl ImageCacheServiceResult {
     #[cfg(not(feature = "channeled"))]
     pub fn bytes_owned(self) -> Vec<u8> {
         match self {
-            Self::Cached(bytes) |  Self::Generated(bytes) => bytes
+            Self::Cached(bytes) | Self::Generated(bytes) => bytes,
         }
     }
     pub fn image_size(&self) -> u32 {
