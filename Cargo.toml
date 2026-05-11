@@ -3,8 +3,11 @@ name = "platform"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+bench = false
+
 [features]
-default = ["buffered"]
+default = ["channeled"]
 buffered = []
 channeled = ["dep:pin-project"]
 

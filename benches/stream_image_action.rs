@@ -36,7 +36,7 @@ pub fn bench_handle_uncached(c: &mut Criterion) {
 
     group
         .sample_size(10)
-        .bench_function("stream_image_action", |b| {
+        .bench_function("stream_image_action_512x512", |b| {
             let runner = tokio::runtime::Runtime::new().unwrap();
             let image_cache_dir = PathBuf::from("./cache/benches/images");
             let iter_count = AtomicU32::new(0);
@@ -77,7 +77,7 @@ pub fn bench_handle_uncached(c: &mut Criterion) {
 
     group
         .sample_size(10)
-        .bench_function("stream_image_action_ttfb", |b| {
+        .bench_function("stream_image_action_ttfb_512x512", |b| {
             let runner = tokio::runtime::Runtime::new().unwrap();
             let image_cache_dir = PathBuf::from("./cache/benches/images");
             let iter_count = AtomicU32::new(0);

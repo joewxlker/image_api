@@ -11,7 +11,7 @@ criterion_home = "./target/criterion"
 # verbose: Like criterion, but prints additional statistics.
 # bencher: Emulates the output format of the bencher crate and nightly-only 
 #   libtest benchmarks.
-output_format = "criterion"
+output_format = "quiet"
 
 # This is used to configure the plotting backend used by cargo-criterion. 
 # Options are "gnuplot" and "plotters", or "auto", which will use gnuplot if it's
