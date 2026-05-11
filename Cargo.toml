@@ -7,7 +7,7 @@ edition = "2024"
 bench = false
 
 [features]
-default = ["channeled"]
+default = ["buffered"]
 buffered = []
 channeled = ["dep:pin-project"]
 
