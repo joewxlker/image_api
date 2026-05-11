@@ -25,7 +25,7 @@ use crate::services::image_service::{
     r#gen::ImageGenerationParams,
 };
 
-#[cfg(not(feature = "channeled"))]
+#[cfg(feature = "buffered")]
 #[instrument(skip(image_client))]
 #[rocket::get("/<index>?<width>&<height>")]
 pub async fn get_image(
@@ -105,10 +105,10 @@ where
     }
 }
 
-#[cfg(not(feature = "channeled"))]
+#[cfg(feature = "buffered")]
 pub struct ImageBytes(pub Vec<u8>);
 
-#[cfg(not(feature = "channeled"))]
+#[cfg(feature = "buffered")]
 impl<'a> Responder<'a, 'a> for ImageBytes {
     fn respond_to(self, _: &'a rocket::Request<'_>) -> response::Result<'a> {
         Response::build()

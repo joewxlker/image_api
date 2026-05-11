@@ -315,7 +315,7 @@ impl ImageCacheService {
 }
 
 impl ImageCacheService {
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub async fn handle(
         &self,
         params: ImageGenerationParams,
@@ -409,7 +409,7 @@ impl ImageCacheServiceResult {
     pub fn is_cached(&self) -> bool {
         matches!(self, Self::Cached(_))
     }
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub fn bytes_owned(self) -> Vec<u8> {
         match self {
             Self::Cached(bytes) | Self::Generated(bytes) => bytes,

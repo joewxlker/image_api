@@ -237,7 +237,7 @@ impl Chunk {
     }
 }
 
-#[cfg(not(feature = "channeled"))]
+#[cfg(feature = "buffered")]
 fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<Vec<u8>, ImageGeneratorError> {
     let dyn_img = DynamicImage::ImageRgb8(img);
 
@@ -364,7 +364,7 @@ impl ImageGenerator {
 
         Ok(img)
     }
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub async fn jpeg_progressive(
         &self,
         params: ImageGenerationParams,
@@ -416,7 +416,7 @@ impl ImageGeneratorService {
 }
 
 impl ImageGeneratorService {
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub async fn handle(&self, params: ImageGenerationParams) -> Result<Vec<u8>, ImageClientError> {
         self.generator
             .jpeg_progressive(params)

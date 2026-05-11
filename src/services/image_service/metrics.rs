@@ -143,7 +143,7 @@ impl ImageMetricsService {
 }
 
 impl ImageMetricsService {
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub async fn handle(
         &self,
         params: ImageGenerationParams,

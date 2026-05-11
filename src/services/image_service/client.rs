@@ -43,7 +43,7 @@ impl ImageClient {
         Ok(result)
     }
 
-    #[cfg(not(feature = "channeled"))]
+    #[cfg(feature = "buffered")]
     pub async fn image(
         &self,
         params: ImageGenerationParams,
