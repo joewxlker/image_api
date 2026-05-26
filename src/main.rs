@@ -4,7 +4,7 @@ use tracing::subscriber::with_default;
 use platform::config::IMAGE_CACHE_DIRECTORY;
 use platform::middleware::cors::CORS;
 use platform::middleware::metrics::RequestMetricsFairing;
-use platform::routes::images;
+use platform::routes::{health, images};
 use platform::services::image_service::cache::MmapImageCache;
 use platform::services::image_service::client::ImageClient;
 use platform::services::image_service::r#gen::ImageGenerator;
@@ -50,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach(RequestMetricsFairing::new())
         .manage(image_client)
         .mount("/images", images::images_routes())
+        .mount("/health", health::health_routes())
         .launch()
         .await?;
 
