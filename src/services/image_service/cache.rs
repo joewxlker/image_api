@@ -107,31 +107,30 @@ impl MmapImageCache {
     }
     pub fn from_path(path: PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
         if !path.exists() {
-            return Err(MmapImageCacheFromPathError::PathInvalid {
-                path,
-                kind: PathInvalidKind::DoesNotExist,
-            });
+            return Err(MmapImageCacheFromPathError::InvalidPath(
+                InvalidPathError::DoesNotExist(path),
+            ));
         }
 
         if !path.is_dir() {
-            return Err(MmapImageCacheFromPathError::PathInvalid {
-                path,
-                kind: PathInvalidKind::NotADirectory,
-            });
+            return Err(MmapImageCacheFromPathError::InvalidPath(
+                InvalidPathError::NotADirectory(path),
+            ));
         }
 
         let metadata = match path.metadata() {
             Ok(meta) => meta,
             Err(source) => {
-                return Err(MmapImageCacheFromPathError::ReadMetadataError { source, path });
+                return Err(MmapImageCacheFromPathError::ReadMetadataError(
+                    ReadMetadataError { source, path },
+                ));
             }
         };
 
         if metadata.permissions().readonly() {
-            return Err(MmapImageCacheFromPathError::PathInvalid {
-                path,
-                kind: PathInvalidKind::ReadOnly,
-            });
+            return Err(MmapImageCacheFromPathError::InvalidPath(
+                InvalidPathError::ReadOnly(path),
+            ));
         }
 
         Ok(Self { path })
@@ -139,29 +138,30 @@ impl MmapImageCache {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum PathInvalidKind {
-    #[error("does not exist")]
-    DoesNotExist,
-    #[error("is not a directory")]
-    NotADirectory,
-    #[error("is read-only")]
-    ReadOnly,
+pub enum InvalidPathError {
+    #[error("the path `{0}` does not exist")]
+    DoesNotExist(PathBuf),
+    #[error("the path `{0}` is not a directory")]
+    NotADirectory(PathBuf),
+    #[error("the path `{0}` is read-only")]
+    ReadOnly(PathBuf),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("failed to read metadata of `{path}`: {source}")]
+pub struct ReadMetadataError {
+    #[source]
+    source: std::io::Error,
+    path: PathBuf,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum MmapImageCacheFromPathError {
-    #[error("Cannot create `MmapImageCache`: the path `{path}` {kind}")]
-    PathInvalid {
-        path: PathBuf,
-        kind: PathInvalidKind,
-    },
+    #[error("Cannot create `MmapImageCache`: {0}")]
+    InvalidPath(InvalidPathError),
 
-    #[error("Cannot create MmapImageCache: failed to read metadata of `{path}`: {source}")]
-    ReadMetadataError {
-        #[source]
-        source: std::io::Error,
-        path: PathBuf,
-    },
+    #[error("Cannot create `MmapImageCache`: {0}")]
+    ReadMetadataError(ReadMetadataError),
 }
 
 pub struct TimedReadResult<T> {
