@@ -178,13 +178,6 @@ impl From<&Config> for Resource {
 
 impl From<Config> for Resource {
     fn from(value: Config) -> Self {
-        Resource::builder()
-            .with_attributes([
-                KeyValue::new("service.name", value.package.name),
-                KeyValue::new("service.version", value.package.version),
-                KeyValue::new("service.instance.id", value.otlp.instance_id),
-                KeyValue::new("environment", value.environment),
-            ])
-            .build()
+        Resource::from(&value)
     }
 }
