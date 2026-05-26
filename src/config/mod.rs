@@ -165,12 +165,19 @@ impl Config {
 
 impl From<&Config> for Resource {
     fn from(value: &Config) -> Self {
+        #[cfg(feature = "channeled")]
+        let mode = "channeled";
+
+        #[cfg(feature = "buffered")]
+        let mode = "buffered";
+
         Resource::builder()
             .with_attributes([
                 KeyValue::new("service.name", value.package.name.clone()),
                 KeyValue::new("service.version", value.package.version.clone()),
                 KeyValue::new("service.instance.id", value.otlp.instance_id.clone()),
                 KeyValue::new("environment", value.environment.clone()),
+                KeyValue::new("images.transport_mode", mode),
             ])
             .build()
     }
