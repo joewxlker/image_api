@@ -8,6 +8,7 @@ bench = false
 
 [features]
 default = ["buffered"]
+bench = []
 buffered = []
 channeled = ["dep:pin-project"]
 
@@ -15,24 +16,9 @@ channeled = ["dep:pin-project"]
 criterion = { version = "0.3", features = ["async_tokio"] }
 
 [[bench]]
-name = "encode_progressive_into"
-harness = false
-required-features = ["channeled"]
-
-[[bench]]
-name = "tee_writer"
-harness = false
-required-features = ["channeled"]
-
-[[bench]]
-name = "stream_image_action"
-harness = false
-required-features = ["channeled"]
-
-[[bench]]
 name = "get_image_action"
 harness = false
-required-features = ["buffered"]
+required-features = ["bench"]
 
 [dependencies]
 rocket = { version = "0.5.1", features = ["json"]}
@@ -68,3 +54,4 @@ opentelemetry-appender-tracing = "0.31.1"
 reqwest = "0.13.2"
 lazy_static = "1.5.0"
 pin-project = { version = "1.1.11", optional = true }
+cpuprofiler = "0.0.4"
