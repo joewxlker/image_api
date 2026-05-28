@@ -1,5 +1,6 @@
 cache
 logs
+.platform
 .env
 target
 Config.toml
