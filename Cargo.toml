@@ -16,7 +16,7 @@ channeled = ["dep:pin-project"]
 criterion = { version = "0.3", features = ["async_tokio"] }
 
 [[bench]]
-name = "get_image_action"
+name = "image_service"
 harness = false
 required-features = ["bench"]
 
