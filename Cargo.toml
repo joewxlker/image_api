@@ -13,8 +13,9 @@ buffered = []
 channeled = ["dep:pin-project"]
 
 [dev-dependencies]
+# pprof's criterion feature currently depends on Criterion 0.5.x.
 criterion = { version = "0.5.1", features = ["async_tokio"] }
-pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
+pprof = { version = "0.15", features = ["flamegraph", "criterion"] }
 cpuprofiler = "0.0.4"
 
 [[bench]]
@@ -24,35 +25,35 @@ required-features = ["bench"]
 
 [dependencies]
 rocket = { version = "0.5.1", features = ["json"]}
-tokio = { version = "1.50.0", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 thiserror = "2.0.18"
-filetime = "0.2.27"
+filetime = "0.2.29"
 temp-dir = "0.2.0"
-log = "0.4.29"
+log = "0.4.30"
 validator = { version = "0.20", features = ["derive"] }
 bon = "3.9.1"
 regex = "1.12.3"
 tracing = "0.1.44"
 jpeg-encoder = "0.7.0"
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 serde = "1.0.228"
-rand = "0.10.0"
-mmap-sync = "2.0.1"
-rkyv = "0.7.40"
+rand = "0.10.1"
+mmap-sync = "2.0.4"
+rkyv = "0.7.4"
 bytecheck = { version = "~0.6.8", default-features = false }
 tower = "0.5.3"
 tracing-subscriber = { version = "0.3.23", features = ["std", "env-filter", "ansi"] }
 dotenv = "0.15.0"
-metrics = "0.24.3"
-metrics-exporter-otel = "0.3.0"
-opentelemetry_sdk = "0.31.0"
-opentelemetry = "0.31.0"
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["reqwest-blocking-client", "http-proto", "trace", "metrics", "logs", "internal-logs"] }
-uuid = { version = "1.23.0", features = ["v4"] }
+metrics = "0.24.6"
+metrics-exporter-otel = "0.3.1"
+opentelemetry_sdk = "0.32.1"
+opentelemetry = "0.32.0"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["reqwest-blocking-client", "http-json", "trace", "metrics", "logs", "internal-logs"] }
+uuid = { version = "1.23.1", features = ["v4"] }
 figment = "0.10.19"
 url = { version = "2.5.8", features = ["serde"] }
-opentelemetry-appender-tracing = "0.31.1"
-reqwest = "0.13.2"
+opentelemetry-appender-tracing = "0.32.0"
+reqwest = "0.13.4"
 lazy_static = "1.5.0"
-pin-project = { version = "1.1.11", optional = true }
+pin-project = { version = "1.1.13", optional = true }
