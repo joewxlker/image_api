@@ -27,14 +27,15 @@ use crate::services::image_service::{
 
 #[cfg(feature = "buffered")]
 #[instrument(skip(image_client))]
-#[rocket::get("/<index>?<width>&<height>")]
+#[rocket::get("/<index>?<width>&<height>&<bypass_cache_read>")]
 pub async fn get_image(
     index: u32,
     width: u32,
     height: u32,
+    bypass_cache_read: Option<bool>,
     image_client: &State<ImageClient>,
 ) -> Result<ImageBytes, ImageRouteError> {
-    let dimensions = ImageGenerationParams::build(index, width, height)?;
+    let dimensions = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
     let image_client = image_client.inner().clone();
 
     let result = image_client.image(dimensions).await?;
@@ -44,16 +45,17 @@ pub async fn get_image(
 
 #[cfg(feature = "channeled")]
 #[instrument(skip(image_client))]
-#[rocket::get("/<index>?<width>&<height>")]
+#[rocket::get("/<index>?<width>&<height>&<bypass_cache_read>")]
 pub async fn get_image<'a>(
     index: u32,
     width: u32,
     height: u32,
+    bypass_cache_read: Option<bool>,
     image_client: &State<ImageClient>,
 ) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
-    let dimensions = ImageGenerationParams::build(index, width, height)?;
+    let params = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
     let image_client = image_client.inner().clone();
-    let image_streaming = stream_image_action(dimensions, image_client).await;
+    let image_streaming = stream_image_action(params, image_client).await;
 
     Ok(ImageStream(image_streaming.stream))
 }

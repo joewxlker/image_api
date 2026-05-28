@@ -312,14 +312,23 @@ pub struct ImageGenerationParams {
     #[validate(range(min = 1, max = *MAX_IMAGE_WIDTH))]
     pub width: u32,
     pub index: u32,
+    pub bypass_cache_read: bool,
 }
 
 impl ImageGenerationParams {
-    pub fn build(index: u32, width: u32, height: u32) -> Result<Self, ValidationErrors> {
+    pub fn build(
+        index: u32,
+        width: u32,
+        height: u32,
+        bypass_cache_read: Option<bool>,
+    ) -> Result<Self, ValidationErrors> {
+        let bypass_cache_read = bypass_cache_read.unwrap_or(false);
+
         let this = Self {
             index,
             width,
             height,
+            bypass_cache_read,
         };
 
         this.validate()?;

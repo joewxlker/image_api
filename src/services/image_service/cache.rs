@@ -319,14 +319,16 @@ impl ImageCacheService {
         &self,
         params: ImageGenerationParams,
     ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        let read_result = self
-            .cache
-            .read_image_bytes(params.index, params.height, params.width)
-            .await
-            .map_err(ImageClientError::ImageCacheError)?;
+        if !params.bypass_cache_read {
+            let read_result = self
+                .cache
+                .read_image_bytes(params.index, params.height, params.width)
+                .await
+                .map_err(ImageClientError::ImageCacheError)?;
 
-        if let Some(image_bytes) = read_result {
-            return Ok(ImageCacheServiceResult::Cached(image_bytes));
+            if let Some(image_bytes) = read_result {
+                return Ok(ImageCacheServiceResult::Cached(image_bytes));
+            }
         }
 
         let image_bytes = self.inner.handle(params).await?;
@@ -354,20 +356,22 @@ impl ImageCacheService {
     where
         W: AsyncWrite + Unpin,
     {
-        if let Some(image_bytes) = self
-            .cache
-            .read_image_bytes(params.index, params.height, params.width)
-            .await
-            .map_err(ImageClientError::ImageCacheError)?
-        {
-            use rocket::futures::AsyncWriteExt;
-
-            writer
-                .write_all(&image_bytes)
+        if !params.bypass_cache_read {
+            if let Some(image_bytes) = self
+                .cache
+                .read_image_bytes(params.index, params.height, params.width)
                 .await
-                .map_err(ImageClientError::WriterError)?;
+                .map_err(ImageClientError::ImageCacheError)?
+            {
+                use rocket::futures::AsyncWriteExt;
 
-            return Ok(ImageCacheServiceResult::Cached(image_bytes));
+                writer
+                    .write_all(&image_bytes)
+                    .await
+                    .map_err(ImageClientError::WriterError)?;
+
+                return Ok(ImageCacheServiceResult::Cached(image_bytes));
+            }
         }
 
         let mut cache = vec![];

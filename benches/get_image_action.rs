@@ -1,13 +1,10 @@
 use std::{
     fs::{create_dir_all, remove_dir_all},
     path::PathBuf,
-    sync::atomic::{AtomicU32, Ordering},
 };
 
 use criterion::{
-    Bencher, Criterion, criterion_group, criterion_main,
-    measurement::WallTime,
-    profiler::{ExternalProfiler, Profiler},
+    Bencher, Criterion, criterion_group, criterion_main, measurement::WallTime, profiler::Profiler,
 };
 
 use criterion::BatchSize;
@@ -32,14 +29,20 @@ fn prepare_request(
     index: u32,
     width: u32,
     height: u32,
+    bypass_cache_read: bool,
 ) -> (ImageClient, ImageGenerationParams) {
+    if !image_cache_dir.exists() {
+        std::fs::create_dir_all(&image_cache_dir).unwrap();
+    }
+
     let client = ImageClient::new(
         ImageGenerator::new(),
         MmapImageCache::from_path(image_cache_dir.clone()).unwrap(),
         ImageMetrics::new(),
     );
 
-    let params = ImageGenerationParams::build(index, width, height).unwrap();
+    let bypass_cache_read = Some(bypass_cache_read);
+    let params = ImageGenerationParams::build(index, width, height, bypass_cache_read).unwrap();
 
     (client, params)
 }
@@ -62,16 +65,10 @@ async fn run_request(
 
 fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
     let runner = tokio::runtime::Runtime::new().unwrap();
-    let iter_count = AtomicU32::new(0);
-    let image_cache_dir = PathBuf::from("./cache/benches/images");
-    initialize_empty_cache_dir(&image_cache_dir);
+    let image_cache_dir = PathBuf::from("./.platform/benches/cache/images");
 
     b.to_async(runner).iter_batched(
-        || {
-            let index = iter_count.fetch_add(1, Ordering::Relaxed);
-
-            prepare_request(image_cache_dir.clone(), index, width, height)
-        },
+        || prepare_request(image_cache_dir.clone(), 0, width, height, true),
         async |(client, params)| {
             let result = run_request(client, params).await;
             assert!(!result.is_cached());
@@ -82,13 +79,18 @@ fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
 
 fn cache_hit(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
     let runner = tokio::runtime::Runtime::new().unwrap();
-    let image_cache_dir = PathBuf::from("./cache/benches/static");
+    let image_cache_dir = PathBuf::from("./.platform/benches/cache/images");
+    let dir = image_cache_dir.clone();
 
-    // TODO - initialize image_cache_dir with asset to 
-    // prevent cache miss on first 'run_request'
+    // Ensure index 0 exists
+    runner.block_on(async move {
+        let (client, params) = prepare_request(dir, 0, width, height, false);
+
+        run_request(client, params).await;
+    });
 
     b.to_async(runner).iter_batched(
-        || prepare_request(image_cache_dir.clone(), 0, width, height),
+        || prepare_request(image_cache_dir.clone(), 0, width, height, false),
         async |(client, params)| {
             let result = run_request(client, params).await;
             assert!(result.is_cached());
