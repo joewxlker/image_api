@@ -152,10 +152,15 @@ fn bench(c: &mut Criterion) {
 struct CpuProfiler;
 
 impl Profiler for CpuProfiler {
-    fn start_profiling(&mut self, benchmark_id: &str, benchmark_dir: &std::path::Path) {
-        std::fs::create_dir_all(benchmark_dir).unwrap();
+    fn start_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &std::path::Path) {
+        if !benchmark_dir.exists() {
+            std::fs::create_dir_all(benchmark_dir).unwrap();
+        }
         let file_path = benchmark_dir.join("profile.pb.gz");
-        std::fs::File::create_new(&file_path).unwrap();
+
+        if !file_path.exists() {
+            std::fs::File::create_new(&file_path).unwrap();
+        }
 
         cpuprofiler::PROFILER
             .lock()
