@@ -3,9 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use criterion::{
-    Bencher, Criterion, criterion_group, criterion_main, measurement::WallTime, profiler::Profiler,
-};
+use criterion::{Bencher, Criterion, criterion_group, criterion_main, measurement::WallTime};
 
 use criterion::BatchSize;
 
@@ -15,6 +13,8 @@ use platform::services::image_service::{
     r#gen::{ImageGenerationParams, ImageGenerator},
     metrics::ImageMetrics,
 };
+
+use pprof::criterion::{Output, PProfProfiler};
 
 pub fn initialize_empty_cache_dir(path: &PathBuf) {
     if path.exists() {
@@ -151,32 +151,12 @@ fn bench(c: &mut Criterion) {
     cache_hit_group.finish();
 }
 
-struct CpuProfiler;
-
-impl Profiler for CpuProfiler {
-    fn start_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &std::path::Path) {
-        if !benchmark_dir.exists() {
-            std::fs::create_dir_all(benchmark_dir).unwrap();
-        }
-        let file_path = benchmark_dir.join("profile.pb.gz");
-
-        if !file_path.exists() {
-            std::fs::File::create_new(&file_path).unwrap();
-        }
-
-        cpuprofiler::PROFILER
-            .lock()
-            .unwrap()
-            .start(file_path.to_str().unwrap())
-            .unwrap();
-    }
-    fn stop_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &std::path::Path) {
-        cpuprofiler::PROFILER.lock().unwrap().stop().unwrap();
-    }
-}
-
 fn with_profiler() -> Criterion {
-    Criterion::default().with_profiler(CpuProfiler)
+    let frequency = 100;
+    let output = Output::Flamegraph(None);
+    let profiler = PProfProfiler::new(frequency, output);
+
+    Criterion::default().with_profiler(profiler)
 }
 
 criterion_group!(
