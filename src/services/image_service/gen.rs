@@ -264,7 +264,8 @@ async fn encode_progressive(
 
         Ok(out)
     })
-    .await.map_err(|_| ImageGeneratorError::JoinError)?
+    .await
+    .map_err(|_| ImageGeneratorError::JoinError)?
 }
 
 #[cfg(feature = "channeled")]
