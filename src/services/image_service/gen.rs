@@ -243,23 +243,25 @@ impl Chunk {
 }
 
 #[cfg(feature = "buffered")]
-fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<Vec<u8>, ImageGeneratorError> {
-    let dyn_img = DynamicImage::ImageRgb8(img);
-
-    let mut out = Vec::new();
-    let mut encoder = Encoder::new(&mut out, 95);
-
-    encoder.set_progressive(true);
-
-    let rgb = dyn_img.to_rgb8();
-    encoder.encode(
-        rgb.as_raw(),
-        rgb.width() as u16,
-        rgb.height() as u16,
-        ColorType::Rgb,
-    )?;
-
-    Ok(out)
+async fn encode_progressive(img: ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<Vec<u8>, ImageGeneratorError> {
+    tokio::task::spawn_blocking(|| {
+        let dyn_img = DynamicImage::ImageRgb8(img);
+    
+        let mut out = Vec::new();
+        let mut encoder = Encoder::new(&mut out, 95);
+    
+        encoder.set_progressive(true);
+    
+        let rgb = dyn_img.to_rgb8();
+        encoder.encode(
+            rgb.as_raw(),
+            rgb.width() as u16,
+            rgb.height() as u16,
+            ColorType::Rgb,
+        )?;
+    
+        Ok(out)
+    }).await.unwrap()
 }
 
 #[cfg(feature = "channeled")]
@@ -380,7 +382,7 @@ impl ImageGenerator {
             .generate_rgb_image(params.index, params.width, params.height)
             .await?;
 
-        encode_progressive(image)
+        encode_progressive(image).await
     }
     #[cfg(feature = "channeled")]
     pub async fn jpeg_progressive_into<W>(
