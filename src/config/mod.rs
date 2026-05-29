@@ -59,25 +59,11 @@ lazy_static! {
         CONFIG.image_encoding.max_height;
     pub static ref MAX_IMAGE_WIDTH: u32 =
         CONFIG.image_encoding.max_width;
-
-    // benchmarks
-    pub static ref TEE_WRITER_MESSAGE_SIZE: usize =
-        CONFIG.benchmark.tee_writer.message_size;
 }
 
 #[derive(Deserialize, Serialize, Clone)]
 struct ImageCache {
     grace_period_ms: u64,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct TeeWriter {
-    message_size: usize,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct BenchMark {
-    tee_writer: TeeWriter,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -116,7 +102,6 @@ struct Config {
     pub image_cache: ImageCache,
     pub image_transport: ImageTransport,
     pub image_encoding: ImageEncoding,
-    pub benchmark: BenchMark,
     pub environment: String,
     pub log_directory: PathBuf,
     pub image_cache_directory: PathBuf,
