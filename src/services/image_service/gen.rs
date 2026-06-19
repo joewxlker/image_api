@@ -242,6 +242,27 @@ impl Chunk {
     }
 }
 
+fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
+    let x_start = 0;
+    let x_end = width;
+    let range = height / parts;
+
+    (0..parts)
+        .map(|i| {
+            let y_start = i * range;
+            let is_final_chunk = i == parts - 1;
+            
+            let y_end = if is_final_chunk {
+                height
+            } else {
+                (i + 1) * range
+            };
+
+            Chunk::new(x_start, x_end, y_start, y_end)
+        })
+        .collect()
+}
+
 #[cfg(feature = "buffered")]
 async fn encode_progressive(
     img: ImageBuffer<Rgb<u8>, Vec<u8>>,
@@ -357,22 +378,14 @@ impl ImageGenerator {
         width: u32,
         height: u32,
     ) -> Result<RgbImage, ImageGeneratorError> {
-        let qtr = height / 4;
+        let chunks = vertical_chunks(height, width, 4);
 
-        let chunks = vec![
-            Chunk::new(0, width, 0, qtr),
-            Chunk::new(0, width, qtr, qtr * 2),
-            Chunk::new(0, width, qtr * 2, qtr * 3),
-            Chunk::new(0, width, qtr * 3, height),
-        ];
-
-        let mut handles = vec![];
-
-        for chunk in chunks {
-            handles.push(tokio::task::spawn_blocking(move || {
-                handle_chunk(index, width, height, chunk)
-            }));
-        }
+        let handles: Vec<_> = chunks
+            .into_iter()
+            .map(|chunk| {
+                tokio::task::spawn_blocking(move || handle_chunk(index, width, height, chunk))
+            })
+            .collect();
 
         let mut img: RgbImage = ImageBuffer::new(width, height);
 
