@@ -253,7 +253,7 @@ fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
         .map(|i| {
             let y_start = i * range;
             let is_final_chunk = i == parts - 1;
-            
+
             let y_end = if is_final_chunk {
                 height
             } else {
@@ -344,7 +344,6 @@ mod test_vertical_chunks {
         vertical_chunks(100, 100, 0);
     }
 }
-
 
 #[cfg(feature = "buffered")]
 async fn encode_progressive(
