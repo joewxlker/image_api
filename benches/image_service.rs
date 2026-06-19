@@ -51,16 +51,8 @@ async fn run_request(
     client: ImageClient,
     params: ImageGenerationParams,
 ) -> ImageCacheServiceResult {
-    #[cfg(feature = "buffered")]
-    {
-        client.image(params).await.unwrap()
-    }
-
-    #[cfg(feature = "channeled")]
-    {
-        let mut writer = vec![];
-        client.image_into(params, &mut writer).await.unwrap()
-    }
+    let mut writer = vec![];
+    client.image_into(params, &mut writer).await.unwrap()
 }
 
 fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
@@ -100,13 +92,7 @@ fn cache_hit(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
 }
 
 fn bench(c: &mut Criterion) {
-    #[cfg(feature = "buffered")]
-    let mode = "buffered";
-
-    #[cfg(feature = "channeled")]
-    let mode = "channeled";
-
-    let mut cache_miss_group = c.benchmark_group(format!("{mode}/cache_miss"));
+    let mut cache_miss_group = c.benchmark_group(format!("cache_miss"));
 
     cache_miss_group
         .sample_size(10)
@@ -128,7 +114,7 @@ fn bench(c: &mut Criterion) {
 
     cache_miss_group.finish();
 
-    let mut cache_hit_group = c.benchmark_group(format!("{mode}/cache_hit"));
+    let mut cache_hit_group = c.benchmark_group(format!("cache_hit"));
 
     cache_hit_group
         .sample_size(100)

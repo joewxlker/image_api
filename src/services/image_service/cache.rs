@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use mmap_sync::guard::ReadResult;
 use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
 
-#[cfg(feature = "channeled")]
 use {crate::util::tee_writer::non_blocking::TeeWriter, rocket::futures::AsyncWrite};
 
 use crate::config::IMAGE_CACHE_GRACE_DURATION;
@@ -314,40 +313,6 @@ impl ImageCacheService {
 }
 
 impl ImageCacheService {
-    #[cfg(feature = "buffered")]
-    pub async fn handle(
-        &self,
-        params: ImageGenerationParams,
-    ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        if !params.bypass_cache_read {
-            let read_result = self
-                .cache
-                .read_image_bytes(params.index, params.height, params.width)
-                .await
-                .map_err(ImageClientError::ImageCacheError)?;
-
-            if let Some(image_bytes) = read_result {
-                return Ok(ImageCacheServiceResult::Cached(image_bytes));
-            }
-        }
-
-        let image_bytes = self.inner.handle(params).await?;
-
-        let bytes = image_bytes.clone();
-        let cache = self.cache.clone();
-        tokio::task::spawn(async move {
-            if let Err(err) = cache
-                .store_image_bytes(params.index, params.height, params.width, &bytes)
-                .await
-            {
-                log::error!("Error occured while writing image to disk: {err}");
-            }
-        });
-
-        Ok(ImageCacheServiceResult::Generated(image_bytes))
-    }
-
-    #[cfg(feature = "channeled")]
     pub async fn handle_into<W>(
         &self,
         params: ImageGenerationParams,
@@ -402,9 +367,6 @@ impl ImageCacheService {
 #[derive(Debug)]
 pub enum ImageCacheServiceResult {
     Cached(Vec<u8>),
-    Generated(Vec<u8>),
-
-    #[cfg(feature = "channeled")]
     Streamed(usize),
 }
 
@@ -412,16 +374,9 @@ impl ImageCacheServiceResult {
     pub fn is_cached(&self) -> bool {
         matches!(self, Self::Cached(_))
     }
-    #[cfg(feature = "buffered")]
-    pub fn bytes_owned(self) -> Vec<u8> {
-        match self {
-            Self::Cached(bytes) | Self::Generated(bytes) => bytes,
-        }
-    }
     pub fn image_size(&self) -> u32 {
         match self {
-            Self::Cached(bytes) | Self::Generated(bytes) => bytes.len() as u32,
-            #[cfg(feature = "channeled")]
+            Self::Cached(bytes) => bytes.len() as u32,
             Self::Streamed(size) => *size as u32,
         }
     }

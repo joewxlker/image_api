@@ -1,4 +1,3 @@
-#[cfg(feature = "channeled")]
 pub mod blocking {
     use std::io;
 
@@ -160,7 +159,6 @@ pub mod blocking {
     }
 }
 
-#[cfg(feature = "channeled")]
 pub mod non_blocking {
     use rocket::futures::{AsyncWrite, FutureExt};
     use std::{io, pin::Pin, task::Context, task::Poll};

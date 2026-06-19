@@ -51,8 +51,6 @@ lazy_static! {
         CONFIG.image_transport.route_handler_queue_size;
     pub static ref IMAGE_CHUNK_SIZE: usize =
         CONFIG.image_transport.chunk_size;
-    pub static ref MAX_INFLIGHT_MEMORY_USAGE: usize =
-        CONFIG.image_transport.max_inflight_memory_usage;
 
     // image encoding
     pub static ref IMAGE_ENCODING_QUALITY: u8 =
@@ -79,7 +77,6 @@ struct ImageEncoding {
 struct ImageTransport {
     encoder_queue_size: usize,
     route_handler_queue_size: usize,
-    max_inflight_memory_usage: usize,
     chunk_size: usize,
 }
 
@@ -153,19 +150,12 @@ impl Config {
 
 impl From<&Config> for Resource {
     fn from(value: &Config) -> Self {
-        #[cfg(feature = "channeled")]
-        let mode = "channeled";
-
-        #[cfg(feature = "buffered")]
-        let mode = "buffered";
-
         Resource::builder()
             .with_attributes([
                 KeyValue::new("service.name", value.package.name.clone()),
                 KeyValue::new("service.version", value.package.version.clone()),
                 KeyValue::new("service.instance.id", value.otlp.instance_id.clone()),
                 KeyValue::new("environment", value.environment.clone()),
-                KeyValue::new("images.transport_mode", mode),
             ])
             .build()
     }

@@ -1,4 +1,3 @@
-#[cfg(feature = "channeled")]
 pub mod non_blocking {
     use std::{
         pin::Pin,

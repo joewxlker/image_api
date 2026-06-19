@@ -8,7 +8,6 @@ use rocket::{
     serde::json::Json,
 };
 
-#[cfg(feature = "channeled")]
 use rocket::{
     futures::{Stream, StreamExt},
     response::stream::ReaderStream,
@@ -17,33 +16,13 @@ use rocket::{
 use tracing::instrument;
 use validator::ValidationErrors;
 
-#[cfg(feature = "channeled")]
-use crate::actions::images::stream_image_action;
+use crate::actions::images::stream_image;
 use crate::services::image_service::{
     cache::{ImageMetadata, MmapImageCacheError},
     client::{ImageClient, ImageClientError},
     r#gen::ImageGenerationParams,
 };
 
-#[cfg(feature = "buffered")]
-#[instrument(skip(image_client))]
-#[rocket::get("/<index>?<width>&<height>&<bypass_cache_read>")]
-pub async fn get_image(
-    index: u32,
-    width: u32,
-    height: u32,
-    bypass_cache_read: Option<bool>,
-    image_client: &State<ImageClient>,
-) -> Result<ImageBytes, ImageRouteError> {
-    let dimensions = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
-    let image_client = image_client.inner().clone();
-
-    let result = image_client.image(dimensions).await?;
-
-    Ok(ImageBytes(result.bytes_owned()))
-}
-
-#[cfg(feature = "channeled")]
 #[instrument(skip(image_client))]
 #[rocket::get("/<index>?<width>&<height>&<bypass_cache_read>")]
 pub async fn get_image<'a>(
@@ -55,7 +34,7 @@ pub async fn get_image<'a>(
 ) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
     let params = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
     let image_client = image_client.inner().clone();
-    let image_streaming = stream_image_action(params, image_client).await;
+    let image_streaming = stream_image(params, image_client).await;
 
     Ok(ImageStream(image_streaming.stream))
 }
@@ -85,10 +64,8 @@ pub enum ImageRouteError {
     ImageClientError(#[from] ImageClientError),
 }
 
-#[cfg(feature = "channeled")]
 pub struct ImageStream<S>(pub S);
 
-#[cfg(feature = "channeled")]
 impl<'r, S: Stream> Responder<'r, 'r> for ImageStream<S>
 where
     S: Send + 'r,
@@ -103,24 +80,6 @@ where
             ))
             .status(Status::Ok)
             .streamed_body(ReaderStream::from(self.0.map(std::io::Cursor::new)))
-            .ok()
-    }
-}
-
-#[cfg(feature = "buffered")]
-pub struct ImageBytes(pub Vec<u8>);
-
-#[cfg(feature = "buffered")]
-impl<'a> Responder<'a, 'a> for ImageBytes {
-    fn respond_to(self, _: &'a rocket::Request<'_>) -> response::Result<'a> {
-        Response::build()
-            .header(ContentType::JPEG)
-            .header(Header::new(
-                CACHE_CONTROL.as_str(),
-                "public, max-age=31536000, immutable",
-            ))
-            .status(Status::Ok)
-            .streamed_body(Cursor::new(self.0))
             .ok()
     }
 }

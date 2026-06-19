@@ -1,4 +1,3 @@
-#[cfg(feature = "channeled")]
 use rocket::futures::AsyncWrite;
 
 use tower::{Layer, ServiceBuilder};
@@ -43,15 +42,6 @@ impl ImageClient {
         Ok(result)
     }
 
-    #[cfg(feature = "buffered")]
-    pub async fn image(
-        &self,
-        params: ImageGenerationParams,
-    ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        self.inner.handle(params).await
-    }
-
-    #[cfg(feature = "channeled")]
     pub async fn image_into<W>(
         &self,
         params: ImageGenerationParams,
@@ -92,7 +82,6 @@ pub enum ImageClientError {
     ImageGenError(#[source] ImageGeneratorError),
     #[error("Failed to operate image cache: {0}")]
     ImageCacheError(#[source] MmapImageCacheError),
-    #[cfg(feature = "channeled")]
     #[error("Failed to write bytes to writer: {0}")]
     WriterError(#[source] std::io::Error),
 }

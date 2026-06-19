@@ -1,4 +1,3 @@
-#[cfg(feature = "channeled")]
 use {
     crate::{
         config::IMAGE_ROUTE_HANDLER_QUEUE_SIZE,
@@ -13,14 +12,12 @@ use {
     tokio::task::JoinHandle,
 };
 
-#[cfg(feature = "channeled")]
 pub struct ImageStreaming<S> {
     pub stream: S,
     pub finished: JoinHandle<Result<ImageCacheServiceResult, ImageClientError>>,
 }
 
-#[cfg(feature = "channeled")]
-pub async fn stream_image_action(
+pub async fn stream_image(
     dimensions: ImageGenerationParams,
     image_client: ImageClient,
 ) -> ImageStreaming<impl Stream<Item = Vec<u8>>> {
