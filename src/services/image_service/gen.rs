@@ -293,56 +293,33 @@ mod test_vertical_chunks {
         assert_eq!(chunks.last().unwrap().y_end, height);
     }
 
-    #[test]
-    fn chunks_single_part() {
-        test_chunks(100, 100, 1);
+    macro_rules! test_chunks {
+        ($name:ident, $w:expr, $h:expr, $p:expr) => {
+            #[test]
+            fn $name() {
+                test_chunks($w, $h, $p);
+            }
+        };
+        ($name:ident, $w:expr, $h:expr, $p:expr, should_panic) => {
+            #[test]
+            #[should_panic]
+            fn $name() {
+                test_chunks($w, $h, $p);
+            }
+        };
     }
 
-    #[test]
-    fn chunks_even_split() {
-        test_chunks(100, 100, 4);
-    }
+    test_chunks!(single_part, 100, 100, 1);
+    test_chunks!(chunks_even_split, 100, 100, 4);
+    test_chunks!(chunks_uneven_split, 100, 101, 4);
+    test_chunks!(chunks_more_parts_than_height, 100, 3, 8);
+    test_chunks!(chunks_zero_height, 100, 0, 4);
+    test_chunks!(chunks_zero_width, 0, 100, 4);
+    test_chunks!(chunks_tiny_image, 1, 1, 1);
+    test_chunks!(chunks_tiny_image_many_parts, 1, 1, 4);
+    test_chunks!(chunks_large_uneven, 1920, 1081, 7);
 
-    #[test]
-    fn chunks_uneven_split() {
-        test_chunks(100, 101, 4);
-    }
-
-    #[test]
-    fn chunks_more_parts_than_height() {
-        test_chunks(100, 3, 8);
-    }
-
-    #[test]
-    fn chunks_zero_height() {
-        test_chunks(100, 0, 4);
-    }
-
-    #[test]
-    fn chunks_zero_width() {
-        test_chunks(0, 100, 4);
-    }
-
-    #[test]
-    fn chunks_tiny_image() {
-        test_chunks(1, 1, 1);
-    }
-
-    #[test]
-    fn chunks_tiny_image_many_parts() {
-        test_chunks(1, 1, 4);
-    }
-
-    #[test]
-    fn chunks_large_uneven() {
-        test_chunks(1920, 1081, 7);
-    }
-
-    #[test]
-    #[should_panic]
-    fn chunks_zero_parts_panics() {
-        vertical_chunks(100, 100, 0);
-    }
+    test_chunks!(zero_parts_panics, 100, 100, 0, should_panic);
 }
 
 #[cfg(feature = "buffered")]

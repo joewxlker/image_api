@@ -51,6 +51,8 @@ lazy_static! {
         CONFIG.image_transport.route_handler_queue_size;
     pub static ref IMAGE_CHUNK_SIZE: usize =
         CONFIG.image_transport.chunk_size;
+    pub static ref MAX_INFLIGHT_MEMORY_USAGE: usize =
+        CONFIG.image_transport.max_inflight_memory_usage;
 
     // image encoding
     pub static ref IMAGE_ENCODING_QUALITY: u8 =
@@ -77,6 +79,7 @@ struct ImageEncoding {
 struct ImageTransport {
     encoder_queue_size: usize,
     route_handler_queue_size: usize,
+    max_inflight_memory_usage: usize,
     chunk_size: usize,
 }
 
