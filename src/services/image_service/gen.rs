@@ -243,6 +243,8 @@ impl Chunk {
 }
 
 fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
+    assert!(parts > 0, "parts must be greater than zero");
+
     let x_start = 0;
     let x_end = width;
     let range = height / parts;
@@ -262,6 +264,87 @@ fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod test_vertical_chunks {
+    use super::*;
+
+    fn test_chunks(width: u32, height: u32, parts: u32) {
+        let chunks = vertical_chunks(height, width, parts);
+
+        assert_eq!(chunks.len(), parts as usize);
+
+        // ensure each chunk's y_end finishes at next chunk's y_start
+        chunks.iter().reduce(|a, b| {
+            assert_eq!(a.y_end, b.y_start);
+
+            b
+        });
+
+        chunks.iter().for_each(|c| {
+            assert!(c.y_start <= c.y_end);
+            // ensure all chunks span the full width
+            assert_eq!(c.x_start, 0);
+            assert_eq!(c.x_end, width);
+        });
+
+        // ensure full height range is covered
+        assert_eq!(chunks.first().unwrap().y_start, 0);
+        assert_eq!(chunks.last().unwrap().y_end, height);
+    }
+
+    #[test]
+    fn chunks_single_part() {
+        test_chunks(100, 100, 1);
+    }
+
+    #[test]
+    fn chunks_even_split() {
+        test_chunks(100, 100, 4);
+    }
+
+    #[test]
+    fn chunks_uneven_split() {
+        test_chunks(100, 101, 4);
+    }
+
+    #[test]
+    fn chunks_more_parts_than_height() {
+        test_chunks(100, 3, 8);
+    }
+
+    #[test]
+    fn chunks_zero_height() {
+        test_chunks(100, 0, 4);
+    }
+
+    #[test]
+    fn chunks_zero_width() {
+        test_chunks(0, 100, 4);
+    }
+
+    #[test]
+    fn chunks_tiny_image() {
+        test_chunks(1, 1, 1);
+    }
+
+    #[test]
+    fn chunks_tiny_image_many_parts() {
+        test_chunks(1, 1, 4);
+    }
+
+    #[test]
+    fn chunks_large_uneven() {
+        test_chunks(1920, 1081, 7);
+    }
+
+    #[test]
+    #[should_panic]
+    fn chunks_zero_parts_panics() {
+        vertical_chunks(100, 100, 0);
+    }
+}
+
 
 #[cfg(feature = "buffered")]
 async fn encode_progressive(
