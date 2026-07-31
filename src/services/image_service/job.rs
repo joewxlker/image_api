@@ -58,7 +58,7 @@ pub enum JobStatus {
     RenderingComplete,
     Encoding,
     Failed,
-    Cancelled
+    Cancelled,
 }
 
 struct ImageJob {
@@ -329,23 +329,16 @@ impl RenderWorker {
                     "render request received by worker"
                 );
 
-                if let Err(err) = process(
+                run_process(
                     &self.worker_id,
                     &self.store,
                     &self.encode_tx,
                     JobType::Render(request_id),
                 )
-                .await
-                {
-                    tracing::error!(
-                        worker_id = ?self.worker_id,
-                        %request_id,
-                        "{err}"
-                    );
-                }
+                .await;
             }
 
-            tracing::error!(
+            tracing::warn!(
                 worker_id = ?self.worker_id,
                 "Render process finished"
             );
@@ -584,13 +577,16 @@ async fn process(
                     "sending encode request"
                 );
 
-                encode_tx.send(request_id).await.map_err(|_| SchedulerError::ChannelClosed)?;
+                encode_tx
+                    .send(request_id)
+                    .await
+                    .map_err(|_| SchedulerError::ChannelClosed)?;
             }
         }
         JobType::Encode(request_id) => {
             let encode_job = {
                 let mut job = store.get_mut(&request_id).await?;
-                
+
                 job.take_encode()?
             };
 
@@ -611,7 +607,7 @@ async fn run_process(
     job_type: JobType,
 ) {
     let request_id = job_type.request_id();
-    
+
     if let Err(err) = process(worker_id, &store, encode_tx, job_type).await {
         tracing::error!("Error occured while processing job: {err}");
 
@@ -693,7 +689,7 @@ impl SchedulerClient {
                 %request_id,
                 "sending render request"
             );
-            
+
             if let Err(_) = self.render_tx.send(request_id).await {
                 self.store.remove(&request_id).await?;
 

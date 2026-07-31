@@ -327,7 +327,10 @@ impl ImageCacheService {
                 .map_err(ImageClientError::ImageCacheError)?
             {
                 if let Err(err) = transport.send(image_bytes).await {
-                    return Err(ImageClientError::WriterError(std::io::Error::new(ErrorKind::BrokenPipe, err)));
+                    return Err(ImageClientError::WriterError(std::io::Error::new(
+                        ErrorKind::BrokenPipe,
+                        err,
+                    )));
                 }
 
                 return Ok(ImageCacheServiceResult::Streamed(0));
