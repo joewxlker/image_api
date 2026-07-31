@@ -10,7 +10,8 @@ use criterion::BatchSize;
 use platform::services::image_service::{
     cache::{ImageCacheServiceResult, MmapImageCache},
     client::ImageClient,
-    r#gen::{ImageGenerationParams, ImageGenerator},
+    r#gen::ImageGenerationParams,
+    job::Scheduler,
     metrics::ImageMetrics,
 };
 
@@ -24,19 +25,21 @@ pub fn initialize_empty_cache_dir(path: &PathBuf) {
     create_dir_all(path).unwrap();
 }
 
-fn prepare_request(
+async fn prepare_request(
     image_cache_dir: PathBuf,
     index: u32,
     width: u32,
     height: u32,
     bypass_cache_read: bool,
-) -> (ImageClient, ImageGenerationParams) {
+) -> (ImageClient, ImageGenerationParams, Scheduler) {
     if !image_cache_dir.exists() {
         std::fs::create_dir_all(&image_cache_dir).unwrap();
     }
 
+    let scheduler = Scheduler::new(10, 10);
+
     let client = ImageClient::new(
-        ImageGenerator::new(),
+        scheduler.get_client(),
         MmapImageCache::from_path(image_cache_dir.clone()).unwrap(),
         ImageMetrics::new(),
     );
@@ -44,15 +47,23 @@ fn prepare_request(
     let bypass_cache_read = Some(bypass_cache_read);
     let params = ImageGenerationParams::build(index, width, height, bypass_cache_read).unwrap();
 
-    (client, params)
+    (client, params, scheduler)
 }
 
 async fn run_request(
     client: ImageClient,
     params: ImageGenerationParams,
 ) -> ImageCacheServiceResult {
-    let mut writer = vec![];
-    client.image_into(params, &mut writer).await.unwrap()
+    let (transport, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
+
+    tokio::task::spawn(async move {
+        let mut out = vec![];
+        while let Some(msg) = receiver.recv().await {
+            out.extend_from_slice(&msg);
+        }
+    });
+
+    client.image_into(params, transport).await.unwrap()
 }
 
 fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
@@ -60,10 +71,22 @@ fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
     let image_cache_dir = PathBuf::from("./.platform/benches/cache/images");
 
     b.to_async(runner).iter_batched(
-        || prepare_request(image_cache_dir.clone(), 0, width, height, true),
-        async |(client, params)| {
+        || {
+            tokio::task::spawn(prepare_request(
+                image_cache_dir.clone(),
+                0,
+                width,
+                height,
+                true,
+            ))
+        },
+        async |prepare| {
+            let (client, params, scheduler) = prepare.await.unwrap();
             let result = run_request(client, params).await;
+
             assert!(!result.is_cached());
+
+            drop(scheduler);
         },
         BatchSize::SmallInput,
     );
@@ -76,16 +99,29 @@ fn cache_hit(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
 
     // Ensure index 0 exists
     runner.block_on(async move {
-        let (client, params) = prepare_request(dir, 0, width, height, false);
+        let (client, params, scheduler) = prepare_request(dir, 0, width, height, false).await;
 
         run_request(client, params).await;
+
+        drop(scheduler);
     });
 
     b.to_async(runner).iter_batched(
-        || prepare_request(image_cache_dir.clone(), 0, width, height, false),
-        async |(client, params)| {
+        || {
+            tokio::task::spawn(prepare_request(
+                image_cache_dir.clone(),
+                0,
+                width,
+                height,
+                false,
+            ))
+        },
+        async |prepare| {
+            let (client, params, scheduler) = prepare.await.unwrap();
             let result = run_request(client, params).await;
             assert!(result.is_cached());
+
+            drop(scheduler);
         },
         BatchSize::SmallInput,
     );

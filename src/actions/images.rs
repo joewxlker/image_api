@@ -6,7 +6,6 @@ use {
             client::{ImageClient, ImageClientError},
             r#gen::ImageGenerationParams,
         },
-        util::channel_writer::non_blocking::ChannelWriter,
     },
     rocket::{futures::Stream, response::stream},
     tokio::task::JoinHandle,
@@ -24,11 +23,8 @@ pub async fn stream_image(
     let buffer = *IMAGE_ROUTE_HANDLER_QUEUE_SIZE;
     let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(buffer);
 
-    let finished = tokio::task::spawn(async move {
-        let mut writer = ChannelWriter::new(sender);
-
-        image_client.image_into(dimensions, &mut writer).await
-    });
+    let finished =
+        tokio::task::spawn(async move { image_client.image_into(dimensions, sender).await });
 
     let stream = stream::stream! {
         while let Some(msg) = receiver.recv().await {

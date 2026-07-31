@@ -5,8 +5,6 @@ use opentelemetry::{
     metrics::{Counter, Histogram},
 };
 
-use rocket::futures::AsyncWrite;
-
 use tracing::instrument;
 
 use crate::services::image_service::{
@@ -142,18 +140,15 @@ impl ImageMetricsService {
 }
 
 impl ImageMetricsService {
-    pub async fn handle_into<W>(
+    pub async fn handle_into(
         &self,
         params: ImageGenerationParams,
-        writer: &mut W,
-    ) -> Result<ImageCacheServiceResult, ImageClientError>
-    where
-        W: AsyncWrite + Unpin,
-    {
+        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
+    ) -> Result<ImageCacheServiceResult, ImageClientError> {
         let key = ImageKey::from(params);
         let start = Instant::now();
 
-        match self.inner.handle_into(params, writer).await {
+        match self.inner.handle_into(params, transport).await {
             Ok(result) => {
                 self.metrics.success(&start, params, &key, &result);
 

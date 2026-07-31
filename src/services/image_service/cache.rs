@@ -7,8 +7,6 @@ use std::time::{Duration, Instant};
 use mmap_sync::guard::ReadResult;
 use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
 
-use {crate::util::tee_writer::non_blocking::TeeWriter, rocket::futures::AsyncWrite};
-
 use crate::config::IMAGE_CACHE_GRACE_DURATION;
 use crate::services::image_service::client::ImageClientError;
 use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGeneratorService};
@@ -313,14 +311,14 @@ impl ImageCacheService {
 }
 
 impl ImageCacheService {
-    pub async fn handle_into<W>(
+    #[tracing::instrument(skip(self, transport))]
+    pub async fn handle_into(
         &self,
         params: ImageGenerationParams,
-        mut writer: W,
-    ) -> Result<ImageCacheServiceResult, ImageClientError>
-    where
-        W: AsyncWrite + Unpin,
-    {
+        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
+    ) -> Result<ImageCacheServiceResult, ImageClientError> {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
+
         if !params.bypass_cache_read {
             if let Some(image_bytes) = self
                 .cache
@@ -328,30 +326,27 @@ impl ImageCacheService {
                 .await
                 .map_err(ImageClientError::ImageCacheError)?
             {
-                use rocket::futures::AsyncWriteExt;
+                if let Err(err) = transport.send(image_bytes).await {
+                    return Err(ImageClientError::WriterError(std::io::Error::new(ErrorKind::BrokenPipe, err)));
+                }
 
-                writer
-                    .write_all(&image_bytes)
-                    .await
-                    .map_err(ImageClientError::WriterError)?;
-
-                return Ok(ImageCacheServiceResult::Cached(image_bytes));
+                return Ok(ImageCacheServiceResult::Streamed(0));
             }
         }
 
-        let mut cache = vec![];
-        {
-            let mut t_writer = TeeWriter::new(writer, &mut cache);
-
-            self.inner.handle_into(params, &mut t_writer).await?;
-
-            // Dropping the writer here closes the stream
-        }
-
-        let size = cache.len();
-
         let image_cache = self.cache.clone();
+
         tokio::task::spawn(async move {
+            let mut cache = vec![];
+
+            while let Some(msg) = receiver.recv().await {
+                cache.extend_from_slice(&msg);
+
+                if let Err(_) = transport.send(msg).await {
+                    return;
+                }
+            }
+
             if let Err(err) = image_cache
                 .store_image_bytes(params.index, params.height, params.width, &cache)
                 .await
@@ -360,7 +355,9 @@ impl ImageCacheService {
             }
         });
 
-        Ok(ImageCacheServiceResult::Streamed(size))
+        self.inner.handle_into(params, sender).await?;
+
+        Ok(ImageCacheServiceResult::Streamed(0))
     }
 }
 

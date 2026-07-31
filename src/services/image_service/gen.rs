@@ -1,14 +1,8 @@
-use image::{DynamicImage, ImageBuffer, Rgb, RgbImage};
-use jpeg_encoder::{ColorType, Encoder, EncodingError};
+use image::Rgb;
 use std::f32::consts::PI;
 use validator::{Validate, ValidationErrors};
 
-use rocket::futures::{AsyncWrite, AsyncWriteExt};
-
-use crate::{
-    config::{IMAGE_CHUNK_SIZE, IMAGE_ENCODER_QUEUE_SIZE, IMAGE_ENCODING_QUALITY},
-    util::channel_writer::blocking::ChannelWriter,
-};
+use crate::services::image_service::job::SchedulerClient;
 use crate::{
     config::{MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH},
     services::image_service::client::ImageClientError,
@@ -69,7 +63,7 @@ fn palette_from_seed(seed: u32) -> [[u8; 3]; 3] {
     [c1, c2, c3]
 }
 
-fn handle_chunk(index: u32, width: u32, height: u32, chunk: Chunk) -> Vec<(u32, u32, Rgb<u8>)> {
+pub fn handle_chunk(index: u32, width: u32, height: u32, chunk: Chunk) -> Vec<(u32, u32, Rgb<u8>)> {
     let seed = index;
     let mut rand = SeededNoise::new(seed);
 
@@ -222,7 +216,8 @@ fn handle_chunk(index: u32, width: u32, height: u32, chunk: Chunk) -> Vec<(u32, 
 }
 
 #[derive(Debug)]
-struct Chunk {
+pub struct Chunk {
+    pub position: u32,
     x_start: u32,
     x_end: u32,
     y_start: u32,
@@ -230,17 +225,18 @@ struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(x_start: u32, x_end: u32, y_start: u32, y_end: u32) -> Self {
+    pub fn new(x_start: u32, x_end: u32, y_start: u32, y_end: u32, position: u32) -> Self {
         Self {
             x_end,
             x_start,
             y_end,
             y_start,
+            position,
         }
     }
 }
 
-fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
+pub fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
     assert!(parts > 0, "parts must be greater than zero");
 
     let x_start = 0;
@@ -258,7 +254,7 @@ fn vertical_chunks(height: u32, width: u32, parts: u32) -> Vec<Chunk> {
                 (i + 1) * range
             };
 
-            Chunk::new(x_start, x_end, y_start, y_end)
+            Chunk::new(x_start, x_end, y_start, y_end, i)
         })
         .collect()
 }
@@ -320,46 +316,6 @@ mod test_vertical_chunks {
     test_chunks!(zero_parts_panics, 100, 100, 0, should_panic);
 }
 
-async fn encode_progressive_into<W>(
-    img: ImageBuffer<Rgb<u8>, Vec<u8>>,
-    out: &mut W,
-) -> Result<(), ImageGeneratorError>
-where
-    W: AsyncWrite + Unpin,
-{
-    let buffer = *IMAGE_ENCODER_QUEUE_SIZE;
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(buffer);
-    let channel_writer = ChannelWriter::new(sender);
-    let capacity = *IMAGE_CHUNK_SIZE;
-    let mut writer = std::io::BufWriter::with_capacity(capacity, channel_writer);
-
-    let handle = tokio::task::spawn_blocking(move || {
-        let quality = *IMAGE_ENCODING_QUALITY;
-        let mut encoder = Encoder::new(&mut writer, quality);
-
-        encoder.set_progressive(true);
-
-        let dyn_img = DynamicImage::ImageRgb8(img);
-        let rgb = dyn_img.to_rgb8();
-        encoder.encode(
-            rgb.as_raw(),
-            rgb.width() as u16,
-            rgb.height() as u16,
-            ColorType::Rgb,
-        )?;
-
-        Ok::<(), ImageGeneratorError>(())
-    });
-
-    while let Some(data) = receiver.recv().await {
-        out.write_all(&data).await?;
-    }
-
-    handle.await.map_err(|_| ImageGeneratorError::JoinError)??;
-
-    Ok(())
-}
-
 #[derive(Copy, Clone, Debug, Validate)]
 pub struct ImageGenerationParams {
     #[validate(range(min = 1, max = *MAX_IMAGE_HEIGHT))]
@@ -393,93 +349,24 @@ impl ImageGenerationParams {
 }
 
 #[derive(Clone)]
-pub struct ImageGenerator;
-
-impl ImageGenerator {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl ImageGenerator {
-    async fn generate_rgb_image(
-        &self,
-        index: u32,
-        width: u32,
-        height: u32,
-    ) -> Result<RgbImage, ImageGeneratorError> {
-        let chunks = vertical_chunks(height, width, 4);
-
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .map(|chunk| {
-                tokio::task::spawn_blocking(move || handle_chunk(index, width, height, chunk))
-            })
-            .collect();
-
-        let mut img: RgbImage = ImageBuffer::new(width, height);
-
-        for handle in handles {
-            let pixels = handle.await.map_err(|_| ImageGeneratorError::JoinError)?;
-
-            for (x, y, pixel) in pixels {
-                img.put_pixel(x, y, pixel);
-            }
-        }
-
-        Ok(img)
-    }
-    pub async fn jpeg_progressive_into<W>(
-        &self,
-        params: ImageGenerationParams,
-        writer: &mut W,
-    ) -> Result<(), ImageGeneratorError>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        let image = self
-            .generate_rgb_image(params.index, params.width, params.height)
-            .await?;
-
-        encode_progressive_into(image, writer).await
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum ImageGeneratorError {
-    #[error("EncodingError: {0}")]
-    EncodingError(#[from] EncodingError),
-    #[error("ImageError: {0}")]
-    ImageError(#[from] image::ImageError),
-    #[error("Unhandled IoError: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("JoinError")]
-    JoinError,
-}
-
-#[derive(Clone)]
 pub struct ImageGeneratorService {
-    generator: ImageGenerator,
+    scheduler: SchedulerClient,
 }
 
 impl ImageGeneratorService {
-    pub fn new(generator: ImageGenerator) -> Self {
-        Self { generator }
+    pub fn new(scheduler: SchedulerClient) -> Self {
+        Self { scheduler }
     }
 }
 
 impl ImageGeneratorService {
-    pub async fn handle_into<W>(
+    pub async fn handle_into(
         &self,
-        params: ImageGenerationParams,
-        writer: &mut W,
-    ) -> Result<(), ImageClientError>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        self.generator
-            .jpeg_progressive_into(params, writer)
-            .await
-            .map_err(ImageClientError::ImageGenError)
+        request: ImageGenerationParams,
+        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
+    ) -> Result<(), ImageClientError> {
+        self.scheduler.handle_request(request, transport).await?;
+
+        Ok(())
     }
 }
