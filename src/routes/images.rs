@@ -8,15 +8,13 @@ use rocket::{
     serde::json::Json,
 };
 
-use rocket::{
-    futures::{Stream, StreamExt},
-    response::stream::ReaderStream,
-};
+use rocket::{futures::StreamExt, response::stream::ReaderStream};
 
+use tokio_stream::Stream;
 use tracing::instrument;
 use validator::ValidationErrors;
 
-use crate::actions::images::stream_image;
+use crate::actions::images::{ImageOutput, stream_image};
 use crate::services::image_service::{
     cache::{ImageMetadata, MmapImageCacheError},
     client::{ImageClient, ImageClientError},
@@ -31,12 +29,12 @@ pub async fn get_image<'a>(
     height: u32,
     bypass_cache_read: Option<bool>,
     image_client: &State<ImageClient>,
-) -> Result<ImageStream<impl Stream<Item = Vec<u8>>>, ImageRouteError> {
+) -> Result<ImageOutput<impl ImageStream + use<>>, ImageRouteError> {
     let params = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
     let image_client = image_client.inner().clone();
-    let image_streaming = stream_image(params, image_client).await;
+    let image_streaming = stream_image(params, image_client).await?;
 
-    Ok(ImageStream(image_streaming.stream))
+    Ok(image_streaming)
 }
 
 #[instrument(skip(image_client))]
@@ -64,23 +62,30 @@ pub enum ImageRouteError {
     ImageClientError(#[from] ImageClientError),
 }
 
-pub struct ImageStream<S>(pub S);
+pub trait ImageStream: Stream<Item: AsRef<[u8]> + Unpin + Send> + Unpin + Send {}
 
-impl<'r, S: Stream> Responder<'r, 'r> for ImageStream<S>
-where
-    S: Send + 'r,
-    S::Item: AsRef<[u8]> + Send + Unpin + 'r,
-{
-    fn respond_to(self, _: &'r rocket::Request<'_>) -> response::Result<'r> {
-        Response::build()
-            .header(ContentType::JPEG)
-            .header(Header::new(
-                CACHE_CONTROL.as_str(),
-                "public, max-age=31536000, immutable",
-            ))
-            .status(Status::Ok)
-            .streamed_body(ReaderStream::from(self.0.map(std::io::Cursor::new)))
-            .ok()
+impl<'r, S: ImageStream + 'r> Responder<'r, 'r> for ImageOutput<S> {
+    fn respond_to(self, _request: &'r rocket::Request<'_>) -> response::Result<'r> {
+        match self {
+            Self::Bytes(bytes) => Response::build()
+                .header(ContentType::JPEG)
+                .header(Header::new(
+                    CACHE_CONTROL.as_str(),
+                    "public, max-age=31536000, immutable",
+                ))
+                .status(Status::Ok)
+                .sized_body(bytes.len(), Cursor::new(bytes))
+                .ok(),
+            Self::Stream(stream) => Response::build()
+                .header(ContentType::JPEG)
+                .header(Header::new(
+                    CACHE_CONTROL.as_str(),
+                    "public, max-age=31536000, immutable",
+                ))
+                .status(Status::Ok)
+                .streamed_body(ReaderStream::from(stream.map(std::io::Cursor::new)))
+                .ok(),
+        }
     }
 }
 

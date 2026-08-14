@@ -6,10 +6,17 @@ use std::time::{Duration, Instant};
 
 use mmap_sync::guard::ReadResult;
 use mmap_sync::synchronizer::{Synchronizer, SynchronizerError};
+use rocket::futures::StreamExt;
+use tokio_stream::Stream;
+use tracing::instrument;
+use uuid::Uuid;
 
+use crate::actions::images::ImageOutput;
 use crate::config::IMAGE_CACHE_GRACE_DURATION;
+use crate::routes::images::ImageStream;
 use crate::services::image_service::client::ImageClientError;
-use crate::services::image_service::r#gen::{ImageGenerationParams, ImageGeneratorService};
+use crate::services::image_service::r#gen::ImageGenerationParams;
+use crate::services::image_service::job::ImageJobService;
 
 #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug)]
 #[archive_attr(derive(bytecheck::CheckBytes))]
@@ -275,14 +282,12 @@ impl MmapImageCache {
     }
     pub async fn store_image_bytes(
         &self,
-        index: u32,
-        height: u32,
-        width: u32,
+        params: ImageGenerationParams,
         bytes: &Vec<u8>,
     ) -> Result<(), MmapImageCacheError> {
-        let key = ImageKey::new(index, height, width);
+        let key = ImageKey::new(params.index, params.height, params.width);
         let mut synchronizer = Synchronizer::new(self.path.join(key.as_str()).as_os_str());
-        let item = ImageCacheItem::new(index, height, width, bytes);
+        let item = ImageCacheItem::new(params.index, params.height, params.width, bytes);
         let grace_duration = *IMAGE_CACHE_GRACE_DURATION;
         synchronizer.write::<ImageCacheItem>(&item, grace_duration)?;
 
@@ -301,24 +306,21 @@ pub enum MmapImageCacheError {
 #[derive(Clone)]
 pub struct ImageCacheService {
     cache: MmapImageCache,
-    inner: ImageGeneratorService,
+    inner: ImageJobService,
 }
 
 impl ImageCacheService {
-    pub fn new(cache: MmapImageCache, inner: ImageGeneratorService) -> Self {
+    pub fn new(cache: MmapImageCache, inner: ImageJobService) -> Self {
         Self { cache, inner }
     }
 }
 
 impl ImageCacheService {
-    #[tracing::instrument(skip(self, transport))]
+    #[tracing::instrument(skip(self))]
     pub async fn handle_into(
         &self,
         params: ImageGenerationParams,
-        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
-    ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
-
+    ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
         if !params.bypass_cache_read {
             if let Some(image_bytes) = self
                 .cache
@@ -326,58 +328,102 @@ impl ImageCacheService {
                 .await
                 .map_err(ImageClientError::ImageCacheError)?
             {
-                if let Err(err) = transport.send(image_bytes).await {
-                    return Err(ImageClientError::WriterError(std::io::Error::new(
-                        ErrorKind::BrokenPipe,
-                        err,
-                    )));
-                }
-
-                return Ok(ImageCacheServiceResult::Streamed(0));
+                return Ok(ImageOutput::Bytes(image_bytes));
             }
         }
 
-        let image_cache = self.cache.clone();
+        let cache = self.cache.clone();
+        let stream = self.inner.handle_into(params).await?;
+        let request_id = stream.request_id;
 
-        tokio::task::spawn(async move {
-            let mut cache = vec![];
-
-            while let Some(msg) = receiver.recv().await {
-                cache.extend_from_slice(&msg);
-
-                if let Err(_) = transport.send(msg).await {
-                    return;
-                }
-            }
-
-            if let Err(err) = image_cache
-                .store_image_bytes(params.index, params.height, params.width, &cache)
-                .await
-            {
-                tracing::error!("Error occurred while writing image to disk: {err}");
-            }
-        });
-
-        self.inner.handle_into(params, sender).await?;
-
-        Ok(ImageCacheServiceResult::Streamed(0))
+        Ok(ImageOutput::Stream(Box::new(
+            ImageCacheStream::new(stream, cache, request_id, params),
+        )))
     }
 }
 
-#[derive(Debug)]
-pub enum ImageCacheServiceResult {
-    Cached(Vec<u8>),
-    Streamed(usize),
+pub struct ImageCacheStream<S: ImageStream> {
+    pub params: ImageGenerationParams,
+    pub request_id: Uuid,
+    inner: S,
+    image: Vec<u8>,
+    cache: MmapImageCache,
 }
 
-impl ImageCacheServiceResult {
-    pub fn is_cached(&self) -> bool {
-        matches!(self, Self::Cached(_))
-    }
-    pub fn image_size(&self) -> u32 {
-        match self {
-            Self::Cached(bytes) => bytes.len() as u32,
-            Self::Streamed(size) => *size as u32,
+impl<S: ImageStream> ImageStream for ImageCacheStream<S> {}
+
+impl<S: ImageStream> ImageCacheStream<S> {
+    pub fn new(
+        inner: S,
+        cache: MmapImageCache,
+        request_id: Uuid,
+        params: ImageGenerationParams,
+    ) -> Self {
+        Self {
+            request_id,
+            cache,
+            params,
+            image: Vec::new(),
+            inner,
         }
     }
+}
+
+impl<S: ImageStream> Stream for ImageCacheStream<S> {
+    type Item = S::Item;
+
+    #[instrument(skip(self, cx))]
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+
+        let this = self.get_mut();
+
+        match this.inner.poll_next_unpin(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(bytes)) => {
+                this.image.extend_from_slice(bytes.as_ref());
+
+                Poll::Ready(Some(bytes))
+            }
+            Poll::Ready(None) => {
+                tracing::debug!(
+                    request_id = %this.request_id,
+                    "Image stream finished; spawning background cache write"
+                );
+
+                tokio::spawn(handle_cache_store(
+                    this.request_id,
+                    this.params,
+                    std::mem::take(&mut this.image),
+                    this.cache.clone(),
+                ));
+
+                Poll::Ready(None)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+#[instrument(skip(params, image, cache))]
+async fn handle_cache_store(
+    request_id: Uuid,
+    params: ImageGenerationParams,
+    image: Vec<u8>,
+    cache: MmapImageCache,
+) {
+    tracing::debug!("cache write started");
+
+    if let Err(err) = cache.store_image_bytes(params, &image).await {
+        tracing::error!("cache write failed: {err}");
+        return;
+    }
+
+    tracing::debug!("cache write completed");
 }

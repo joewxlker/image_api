@@ -1,36 +1,36 @@
-use {
-    crate::{
-        config::IMAGE_ROUTE_HANDLER_QUEUE_SIZE,
-        services::image_service::{
-            cache::ImageCacheServiceResult,
-            client::{ImageClient, ImageClientError},
-            r#gen::ImageGenerationParams,
-        },
+use crate::{
+    routes::images::ImageStream,
+    services::image_service::{
+        client::{ImageClient, ImageClientError},
+        r#gen::ImageGenerationParams,
     },
-    rocket::{futures::Stream, response::stream},
-    tokio::task::JoinHandle,
 };
 
-pub struct ImageStreaming<S> {
-    pub stream: S,
-    pub finished: JoinHandle<Result<ImageCacheServiceResult, ImageClientError>>,
+pub enum ImageOutput<S: ImageStream> {
+    Bytes(Vec<u8>),
+    Stream(Box<S>),
+}
+
+impl<S: ImageStream> ImageOutput<S> {
+    pub fn map_stream<T: ImageStream>(self, f: impl FnOnce(S) -> T) -> ImageOutput<T> {
+        use ImageOutput::*;
+
+        match self {
+            Bytes(cache) => ImageOutput::<T>::Bytes(cache),
+            Stream(stream) => Stream(Box::new(f(*stream))),
+        }
+    }
+}
+
+impl<S: ImageStream> ImageOutput<S> {
+    pub fn is_cached(&self) -> bool {
+        matches!(self, Self::Bytes(_))
+    }
 }
 
 pub async fn stream_image(
-    dimensions: ImageGenerationParams,
+    params: ImageGenerationParams,
     image_client: ImageClient,
-) -> ImageStreaming<impl Stream<Item = Vec<u8>>> {
-    let buffer = *IMAGE_ROUTE_HANDLER_QUEUE_SIZE;
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(buffer);
-
-    let finished =
-        tokio::task::spawn(async move { image_client.image_into(dimensions, sender).await });
-
-    let stream = stream::stream! {
-        while let Some(msg) = receiver.recv().await {
-            yield msg
-        }
-    };
-
-    ImageStreaming { stream, finished }
+) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
+    image_client.image_into(params).await
 }

@@ -1,13 +1,15 @@
 use tower::{Layer, ServiceBuilder};
 
-use crate::services::image_service::{
-    cache::{
-        ImageCacheService, ImageCacheServiceResult, ImageMetadata, MmapImageCache,
-        MmapImageCacheError,
+use crate::{
+    actions::images::ImageOutput, routes::images::ImageStream, services::image_service::{
+        cache::{
+            ImageCacheService, ImageMetadata, MmapImageCache,
+            MmapImageCacheError,
+        },
+        r#gen::ImageGenerationParams,
+        job::{ImageJobService, SchedulerClient, SchedulerError},
+        metrics::{ImageMetrics, ImageMetricsService},
     },
-    r#gen::{ImageGenerationParams, ImageGeneratorService},
-    job::{SchedulerClient, SchedulerError},
-    metrics::{ImageMetrics, ImageMetricsService},
 };
 
 #[derive(Clone)]
@@ -21,7 +23,7 @@ impl ImageClient {
         let inner = ServiceBuilder::new()
             .layer(ImageMetricsLayer(metrics.clone()))
             .layer(ImageCacheLayer(cache.clone()))
-            .service(ImageGeneratorService::new(generator.clone()));
+            .service(ImageJobService::new(generator.clone()));
 
         Self { inner, cache }
     }
@@ -44,9 +46,8 @@ impl ImageClient {
     pub async fn image_into(
         &self,
         params: ImageGenerationParams,
-        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
-    ) -> Result<ImageCacheServiceResult, ImageClientError> {
-        self.inner.handle_into(params, transport).await
+    ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
+        self.inner.handle_into(params).await
     }
 }
 
@@ -64,10 +65,10 @@ impl Layer<ImageCacheService> for ImageMetricsLayer {
 #[derive(Clone)]
 pub struct ImageCacheLayer(pub MmapImageCache);
 
-impl Layer<ImageGeneratorService> for ImageCacheLayer {
+impl Layer<ImageJobService> for ImageCacheLayer {
     type Service = ImageCacheService;
 
-    fn layer(&self, inner: ImageGeneratorService) -> Self::Service {
+    fn layer(&self, inner: ImageJobService) -> Self::Service {
         ImageCacheService::new(self.0.clone(), inner)
     }
 }

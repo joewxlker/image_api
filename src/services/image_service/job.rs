@@ -1,19 +1,22 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, sync::Arc};
 
 use async_channel::{Receiver, RecvError, SendError, Sender, TryRecvError};
 use image::{DynamicImage, ImageBuffer, Rgb, RgbImage};
-use jpeg_encoder::{ColorType, Encoder};
+use jpeg_encoder::{ColorType, Encoder, EncodingError};
 
+use rocket::futures::Stream;
 use tokio::{
     select,
     sync::{MappedMutexGuard, Mutex, MutexGuard},
     task::{JoinError, JoinHandle},
 };
+use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::instrument;
 use uuid::Uuid;
 
 use crate::{
     config::{IMAGE_CHUNK_SIZE, IMAGE_ENCODING_QUALITY},
+    routes::images::ImageStream,
     services::image_service::r#gen::{Chunk, ImageGenerationParams, handle_chunk, vertical_chunks},
     util::channel_writer::blocking::ChannelWriter,
 };
@@ -51,14 +54,31 @@ impl From<ImageGenerationParams> for RenderParams {
     }
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub enum JobStatus {
     Idle,
     Rendering,
     RenderingComplete,
     Encoding,
-    Failed,
-    Cancelled,
+}
+
+impl Default for JobStatus {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+impl std::fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = match self {
+            Self::Idle => "idle",
+            Self::Rendering => "rendering",
+            Self::RenderingComplete => "rendering complete",
+            Self::Encoding => "encoding",
+        };
+
+        f.write_str(status)
+    }
 }
 
 struct ImageJob {
@@ -67,8 +87,9 @@ struct ImageJob {
     params: RenderParams,
     required_chunks: usize,
     pending_chunks: Vec<Chunk>,
-    completed_chunks: Option<Vec<CompletedChunk>>,
-    transport: tokio::sync::mpsc::Sender<Vec<u8>>,
+    completed_chunks: Vec<CompletedChunk>,
+    cancel_token: CancellationToken,
+    transport: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
 }
 
 impl std::fmt::Debug for ImageJob {
@@ -79,10 +100,7 @@ impl std::fmt::Debug for ImageJob {
             .field("params", &self.params)
             .field("required_chunks", &self.required_chunks)
             .field("pending_chunks", &self.pending_chunks.len())
-            .field(
-                "completed_chunks",
-                &self.completed_chunks.as_ref().map(Vec::len),
-            )
+            .field("completed_chunks", &self.completed_chunks.len())
             .field("finished", &"<oneshot::Sender>")
             .finish()
     }
@@ -97,31 +115,37 @@ impl ImageJob {
         request_id: Uuid,
         chunks: Vec<Chunk>,
         params: RenderParams,
+        cancel_token: CancellationToken,
         transport: tokio::sync::mpsc::Sender<Vec<u8>>,
     ) -> Self {
         let required_chunks = chunks.len();
         Self {
-            request_id: request_id,
-            status: JobStatus::Idle,
+            request_id,
+            status: JobStatus::default(),
             required_chunks,
             params,
             pending_chunks: chunks,
-            completed_chunks: Some(Vec::new()),
-            transport,
+            completed_chunks: Vec::new(),
+            cancel_token,
+            transport: Some(transport),
         }
     }
-    #[instrument(
-        skip(self),
-        fields(request_id = %self.request_id, initial_status = ?self.status)
-    )]
+    fn update_status(&mut self, new_status: JobStatus) {
+        tracing::debug!(
+            from = ?self.status,
+            to = ?new_status,
+            "job state transition"
+        );
+
+        self.status = new_status;
+    }
+    fn request_dropped(&self) -> bool {
+        self.cancel_token.is_cancelled()
+    }
+    #[instrument(skip_all)]
     pub fn take_chunk(&mut self) -> Result<RenderJob, ImageJobError> {
         if self.status == JobStatus::Idle {
-            tracing::debug!(
-                from = ?self.status,
-                to = ?JobStatus::Rendering,
-                "job state transition"
-            );
-            self.status = JobStatus::Rendering;
+            self.update_status(JobStatus::Rendering);
         }
 
         let expected = JobStatus::Rendering;
@@ -135,9 +159,9 @@ impl ImageJob {
             .ok_or(ImageJobError::PendingChunkNotFound)?;
 
         tracing::debug!(
-            completed = self.completed_chunks.as_ref().map(Vec::len).unwrap_or(0),
+            completed = self.completed_chunks.len(),
             remaining = self.pending_chunks.len(),
-            "render chunk completed"
+            "render chunk acquired"
         );
 
         Ok(RenderJob {
@@ -146,36 +170,25 @@ impl ImageJob {
             chunk,
         })
     }
-    #[instrument(
-        skip(self),
-        fields(request_id = %self.request_id, initial_status = ?self.status)
-    )]
+    #[instrument(skip_all)]
     pub fn take_encode(&mut self) -> Result<EncodeJob, ImageJobError> {
         let expected = JobStatus::RenderingComplete;
         if self.status != expected {
             return Err(ImageJobError::InvalidState(expected, self.status));
         }
 
-        tracing::debug!(
-            from = ?self.status,
-            to = ?JobStatus::Encoding,
-            "job state transition"
-        );
-        self.status = JobStatus::Encoding;
+        self.update_status(JobStatus::Encoding);
 
         tracing::debug!("encode job created");
 
         Ok(EncodeJob {
             request_id: self.request_id,
             params: self.params,
-            chunks: self.completed_chunks.take().unwrap(),
-            transport: self.transport.clone(),
+            chunks: self.completed_chunks.drain(..).collect(),
+            transport: self.transport.take().unwrap(),
         })
     }
-    #[instrument(
-        skip(self),
-        fields(request_id = %self.request_id, initial_status = ?self.status)
-    )]
+    #[instrument(skip_all)]
     pub fn on_render_complete(
         &mut self,
         chunk: CompletedChunk,
@@ -185,24 +198,17 @@ impl ImageJob {
             return Err(ImageJobError::InvalidState(expected, self.status));
         }
 
+        self.completed_chunks.push(chunk);
+
+        if self.completed_chunks.len() == self.required_chunks {
+            self.update_status(JobStatus::RenderingComplete);
+        }
+
         tracing::debug!(
-            completed = self.completed_chunks.as_ref().map(Vec::len).unwrap_or(0),
+            completed = self.completed_chunks.len(),
             required = self.required_chunks,
             "render chunk completed"
         );
-
-        if let Some(chunks) = &mut self.completed_chunks {
-            chunks.push(chunk);
-
-            if chunks.len() == self.required_chunks {
-                tracing::debug!(
-                    from = ?self.status,
-                    to = ?JobStatus::RenderingComplete,
-                    "job state transition"
-                );
-                self.status = JobStatus::RenderingComplete;
-            }
-        }
 
         Ok(self.status)
     }
@@ -229,7 +235,7 @@ impl JobStore {
 }
 
 impl JobStore {
-    #[instrument(skip(self, job))]
+    #[instrument(skip_all)]
     pub async fn insert(&self, request_id: Uuid, job: ImageJob) -> Result<(), JobStoreError> {
         tracing::debug!("Inserting image job");
 
@@ -243,7 +249,7 @@ impl JobStore {
         tracing::debug!("Image job inserted successfully");
         Ok(())
     }
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub async fn get_mut(
         &self,
         request_id: &Uuid,
@@ -262,7 +268,7 @@ impl JobStore {
                 JobStoreError::JobNotFound
             })
     }
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub async fn remove(&self, request_id: &Uuid) -> Result<ImageJob, JobStoreError> {
         tracing::debug!("Removing image job");
 
@@ -285,10 +291,6 @@ impl JobStore {
 pub enum JobStoreError {
     #[error("multiple jobs created with the same request_id")]
     DuplicateJobs,
-    #[error("invalid job state: expected {0:?}, got {1:?}")]
-    InvalidJobState(JobStatus, JobStatus),
-    #[error("rendering job requested but no pending chunks remain")]
-    PendingChunkNotFound,
     #[error("job not found")]
     JobNotFound,
 }
@@ -321,29 +323,27 @@ impl RenderWorker {
 impl RenderWorker {
     #[instrument(skip(self))]
     fn start(self) -> JoinHandle<()> {
-        tokio::task::spawn(async move {
-            while let Ok(request_id) = self.render_rx.recv().await {
-                tracing::debug!(
-                    worker_id = ?self.worker_id,
-                    %request_id,
-                    "render request received by worker"
-                );
-
-                run_process(
-                    &self.worker_id,
-                    &self.store,
-                    &self.encode_tx,
-                    JobType::Render(request_id),
-                )
-                .await;
-            }
-
-            tracing::warn!(
-                worker_id = ?self.worker_id,
-                "Render process finished"
-            );
-        })
+        tokio::task::spawn(render_worker(self))
     }
+}
+
+#[instrument(skip(worker), fields(worker_id = %worker.worker_id))]
+async fn render_worker(worker: RenderWorker) {
+    while let Ok(request_id) = worker.render_rx.recv().await {
+        tracing::debug!(
+            %request_id,
+            "render request received by worker"
+        );
+
+        process_jobtype(
+            &worker.store,
+            &worker.encode_tx,
+            JobType::Render(request_id),
+        )
+        .await;
+    }
+
+    tracing::warn!("Render process finished");
 }
 
 async fn process_chunk(j: RenderJob) -> Result<CompletedChunk, RenderError> {
@@ -365,10 +365,6 @@ async fn process_chunk(j: RenderJob) -> Result<CompletedChunk, RenderError> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum RenderError {
-    #[error("Rendering timed out")]
-    Timeout,
-    #[error("Job was aborted")]
-    JobAborted,
     #[error("JobStoreError: {0}")]
     StoreError(#[from] JobStoreError),
     #[error("Send failed {0}")]
@@ -422,47 +418,39 @@ impl EncodeWorker {
 }
 
 impl EncodeWorker {
-    #[instrument(skip(self))]
     fn start(self) -> JoinHandle<()> {
-        tokio::task::spawn(async move {
-            loop {
-                let job = match self.encode_rx.try_recv() {
-                    Ok(j) => JobType::Encode(j),
-                    Err(TryRecvError::Empty) => match self.render_rx.try_recv() {
-                        Ok(j) => JobType::Render(j),
-                        Err(TryRecvError::Empty) => {
-                            match select! {
-                                biased;
-                                j = self.encode_rx.recv() => j.map(JobType::Encode),
-                                j = self.render_rx.recv() => j.map(JobType::Render)
-                            } {
-                                Ok(j) => j,
-                                Err(RecvError) => break,
-                            }
-                        }
-                        Err(TryRecvError::Closed) => break,
-                    },
-                    Err(TryRecvError::Closed) => break,
-                };
-
-                let request_id = job.request_id();
-
-                tracing::debug!(
-                    worker_id = ?self.worker_id,
-                    %request_id,
-                    job_type = format!("{:?}", job),
-                    "request received by encode worker"
-                );
-
-                run_process(&self.worker_id, &self.store, &self.encode_tx, job).await;
-            }
-
-            tracing::warn!(
-                worker_id = ?self.worker_id,
-                "Encode process finished"
-            );
-        })
+        tokio::task::spawn(encode_worker(self))
     }
+}
+
+#[instrument(skip(worker), fields(worker_id = %worker.worker_id))]
+async fn encode_worker(worker: EncodeWorker) {
+    loop {
+        let job = match worker.encode_rx.try_recv() {
+            Ok(j) => JobType::Encode(j),
+            Err(TryRecvError::Empty) => match worker.render_rx.try_recv() {
+                Ok(j) => JobType::Render(j),
+                Err(TryRecvError::Empty) => {
+                    match select! {
+                        biased;
+                        j = worker.encode_rx.recv() => j.map(JobType::Encode),
+                        j = worker.render_rx.recv() => j.map(JobType::Render)
+                    } {
+                        Ok(j) => j,
+                        Err(RecvError) => break,
+                    }
+                }
+                Err(TryRecvError::Closed) => break,
+            },
+            Err(TryRecvError::Closed) => break,
+        };
+
+        tracing::debug!("request received by encode worker");
+
+        process_jobtype(&worker.store, &worker.encode_tx, job).await;
+    }
+
+    tracing::warn!("Encode process finished");
 }
 
 enum JobType {
@@ -500,7 +488,6 @@ impl std::fmt::Debug for JobType {
     }
 }
 
-#[instrument]
 async fn encode_and_transport(j: EncodeJob) -> Result<(), EncodeError> {
     let mut img: RgbImage = ImageBuffer::new(j.params.width, j.params.height);
 
@@ -515,7 +502,7 @@ async fn encode_and_transport(j: EncodeJob) -> Result<(), EncodeError> {
     let mut writer: std::io::BufWriter<ChannelWriter> =
         std::io::BufWriter::with_capacity(capacity, channel_writer);
 
-    tokio::task::spawn_blocking(move || {
+    let mut handle = tokio::task::spawn_blocking(move || {
         let quality = *IMAGE_ENCODING_QUALITY;
         let mut encoder = Encoder::new(&mut writer, quality);
 
@@ -532,8 +519,26 @@ async fn encode_and_transport(j: EncodeJob) -> Result<(), EncodeError> {
         )?;
 
         Ok::<(), EncodeError>(())
-    })
-    .await??;
+    });
+
+    let warning = tokio::time::sleep(std::time::Duration::from_secs(3));
+    tokio::pin!(warning);
+
+    tokio::select! {
+        biased;
+
+        result = &mut handle => {
+            result??;
+        }
+
+        _ = &mut warning => {
+            tracing::warn!(
+                "Encoding took longer than 3 seconds; continuing to wait for completion"
+            );
+
+            handle.await??;
+        }
+    }
 
     Ok(())
 }
@@ -546,80 +551,142 @@ pub enum EncodeError {
     JoinError(#[from] JoinError),
     #[error("Encoding timed out")]
     Timeout,
-    #[error("Job aborted")]
-    JobAborted,
 }
 
-#[instrument(skip(store, encode_tx))]
-async fn process(
-    worker_id: &Uuid,
+async fn handle_request_drop(
+    guard: MappedMutexGuard<'_, ImageJob>,
+    request_id: Uuid,
     store: &Arc<JobStore>,
-    encode_tx: &Sender<Uuid>,
-    job_type: JobType,
-) -> Result<(), SchedulerError> {
-    match job_type {
-        JobType::Render(request_id) => {
-            let chunk = {
-                let mut job = store.get_mut(&request_id).await?;
-                job.take_chunk()?
-            };
-
-            let completed_chunk = process_chunk(chunk).await?;
-
-            let status = {
-                let mut job = store.get_mut(&request_id).await?;
-                job.on_render_complete(completed_chunk)?
-            };
-
-            if status == JobStatus::RenderingComplete {
-                tracing::debug!(
-                    %request_id,
-                    "sending encode request"
-                );
-
-                encode_tx
-                    .send(request_id)
-                    .await
-                    .map_err(|_| SchedulerError::ChannelClosed)?;
-            }
-        }
-        JobType::Encode(request_id) => {
-            let encode_job = {
-                let mut job = store.get_mut(&request_id).await?;
-
-                job.take_encode()?
-            };
-
-            encode_and_transport(encode_job).await?;
-
-            store.remove(&request_id).await?;
-        }
-    };
+) -> Result<(), ProcessError> {
+    drop(guard);
+    tracing::debug!("skipping job because request was cancelled");
+    store.remove(&request_id).await?;
 
     Ok(())
 }
 
-#[instrument(skip(store, encode_tx), fields(request_id = %job_type.request_id()))]
-async fn run_process(
-    worker_id: &Uuid,
+#[instrument(skip(store, encode_tx))]
+async fn process_render_job(
+    request_id: Uuid,
     store: &Arc<JobStore>,
     encode_tx: &Sender<Uuid>,
-    job_type: JobType,
-) {
+) -> Result<(), ProcessError> {
+    let chunk = {
+        let mut job = store.get_mut(&request_id).await?;
+
+        if job.request_dropped() {
+            handle_request_drop(job, request_id, store).await?;
+            return Ok(());
+        }
+
+        job.take_chunk()?
+    };
+
+    let completed_chunk: CompletedChunk = process_chunk(chunk).await?;
+
+    let status = {
+        let mut job = store.get_mut(&request_id).await?;
+
+        if job.request_dropped() {
+            handle_request_drop(job, request_id, store).await?;
+            return Ok(());
+        }
+
+        job.on_render_complete(completed_chunk)?
+    };
+
+    if status == JobStatus::RenderingComplete {
+        tracing::debug!(
+            %request_id,
+            "sending encode request"
+        );
+
+        encode_tx
+            .send(request_id)
+            .await
+            .map_err(|_| ProcessError::ChannelClosed)?;
+    }
+
+    Ok(())
+}
+
+#[instrument(skip(store))]
+async fn process_encode_job(request_id: Uuid, store: &Arc<JobStore>) -> Result<(), ProcessError> {
+    let encode_job = {
+        let mut job: MappedMutexGuard<'_, ImageJob> = store.get_mut(&request_id).await?;
+
+        if job.request_dropped() {
+            handle_request_drop(job, request_id, store).await?;
+            return Ok(());
+        }
+
+        job.take_encode()?
+    };
+
+    let encode_result = encode_and_transport(encode_job).await;
+
+    {
+        let job = store.get_mut(&request_id).await?;
+
+        if job.request_dropped() {
+            handle_request_drop(job, request_id, store).await?;
+            return Ok(());
+        }
+
+        if let Err(err) = encode_result {
+            let broken_pipe = match &err {
+                EncodeError::EncodingError(EncodingError::IoError(io_error)) => {
+                    io_error.kind() == ErrorKind::BrokenPipe
+                }
+                _ => false,
+            };
+
+            if broken_pipe {
+                handle_request_drop(job, request_id, store).await?;
+                return Ok(());
+            }
+
+            return Err(ProcessError::EncodeError(err));
+        }
+    }
+
+    if let Err(err) = store.remove(&request_id).await {
+        tracing::error!(error = %err, "Error occurred while removing job");
+    }
+
+    Ok(())
+}
+
+#[instrument(skip(store, encode_tx))]
+async fn process_jobtype(store: &Arc<JobStore>, encode_tx: &Sender<Uuid>, job_type: JobType) {
     let request_id = job_type.request_id();
 
-    if let Err(err) = process(worker_id, &store, encode_tx, job_type).await {
-        tracing::error!("Error occured while processing job: {err}");
+    let result = match job_type {
+        JobType::Render(request_id) => process_render_job(request_id, store, encode_tx).await,
+        JobType::Encode(request_id) => process_encode_job(request_id, store).await,
+    };
 
-        match store.get_mut(&request_id).await {
-            Ok(mut j) => j.status = JobStatus::Failed,
-            Err(err) => {
-                tracing::error!("Failed to load job: {err}");
+    if let Err(err) = result {
+        tracing::error!(error = %err, "Error occurred while processing job");
 
-                return;
-            }
-        };
+        if let Err(err) = store.remove(&request_id).await {
+            tracing::error!(error = %err, "Error occurred while removing job");
+        }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ProcessError {
+    #[error("ImageJobError: {0}")]
+    ImageJobError(#[from] ImageJobError),
+    #[error("JobStoreError: {0}")]
+    JobStoreError(#[from] JobStoreError),
+    #[error("RenderError: {0}")]
+    RenderError(#[from] RenderError),
+    #[error("EncodeError: {0}")]
+    EncodeError(#[from] EncodeError),
+    #[error("Channel closed")]
+    ChannelClosed,
 }
 
 pub struct Scheduler {
@@ -637,11 +704,9 @@ impl Scheduler {
 
         Self {
             _encoders: (0..encoders)
-                .into_iter()
                 .map(|_| EncodeWorker::new(&store, &encode_tx, &encode_rx, &render_rx).start())
                 .collect(),
             _renderers: (0..renderers)
-                .into_iter()
                 .map(|_| RenderWorker::new(&store, &render_rx, &encode_tx).start())
                 .collect(),
             store,
@@ -668,8 +733,11 @@ impl SchedulerClient {
     pub async fn handle_request(
         &self,
         request: ImageGenerationParams,
-        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
-    ) -> Result<(), SchedulerError> {
+    ) -> Result<ImageJobStream, SchedulerError> {
+        let (transport, transport_rx) = tokio::sync::mpsc::channel(64);
+        let cancel_token = CancellationToken::new();
+        let drop_guard = cancel_token.clone().drop_guard();
+
         let request_id = Uuid::new_v4();
 
         let chunks = vertical_chunks(
@@ -680,7 +748,7 @@ impl SchedulerClient {
 
         let parts = chunks.len();
         let params = RenderParams::from(request);
-        let job = ImageJob::new(request_id, chunks, params, transport);
+        let job = ImageJob::new(request_id, chunks, params, cancel_token, transport);
 
         self.store.insert(request_id, job).await?;
 
@@ -697,35 +765,88 @@ impl SchedulerClient {
             }
         }
 
-        Ok(())
+        Ok(ImageJobStream::new(&request_id, transport_rx, drop_guard))
     }
 }
 
-impl From<async_channel::TrySendError<Uuid>> for SchedulerError {
-    fn from(value: async_channel::TrySendError<Uuid>) -> Self {
-        match value {
-            async_channel::TrySendError::Closed(_) => {
-                return SchedulerError::ChannelClosed;
-            }
-            async_channel::TrySendError::Full(_) => {
-                return SchedulerError::TooManyRequests;
-            }
+// impl From<async_channel::TrySendError<Uuid>> for SchedulerError {
+//     fn from(value: async_channel::TrySendError<Uuid>) -> Self {
+//         match value {
+//             async_channel::TrySendError::Closed(_) => {
+//                 return SchedulerError::ChannelClosed;
+//             }
+//             async_channel::TrySendError::Full(_) => {
+//                 return SchedulerError::TooManyRequests;
+//             }
+//         }
+//     }
+// }
+
+#[derive(thiserror::Error, Debug)]
+pub enum SchedulerError {
+    #[error("JobStoreError: {0}")]
+    JobStoreError(#[from] JobStoreError),
+    // #[error("Too many requests")]
+    // TooManyRequests,
+    #[error("Channel closed")]
+    ChannelClosed,
+}
+
+pub struct ImageJobStream {
+    pub request_id: Uuid,
+    pub transport: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    _drop_guard: DropGuard,
+}
+
+impl ImageJobStream {
+    fn new(
+        request_id: &Uuid,
+        transport: tokio::sync::mpsc::Receiver<Vec<u8>>,
+        drop_guard: DropGuard,
+    ) -> Self {
+        Self {
+            request_id: *request_id,
+            transport,
+            _drop_guard: drop_guard,
         }
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum SchedulerError {
-    #[error("ImageJobError: {0}")]
-    ImageJobError(#[from] ImageJobError),
-    #[error("JobStoreError: {0}")]
-    JobStoreError(#[from] JobStoreError),
-    #[error("RenderError: {0}")]
-    RenderError(#[from] RenderError),
-    #[error("EncodeError: {0}")]
-    EncodeError(#[from] EncodeError),
-    #[error("Too many requests")]
-    TooManyRequests,
-    #[error("Channel closed")]
-    ChannelClosed,
+impl ImageStream for ImageJobStream {}
+
+impl Stream for ImageJobStream {
+    type Item = Vec<u8>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        this.transport.poll_recv(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
+#[derive(Clone)]
+pub struct ImageJobService {
+    scheduler: SchedulerClient,
+}
+
+impl ImageJobService {
+    pub fn new(scheduler: SchedulerClient) -> Self {
+        Self { scheduler }
+    }
+}
+
+impl ImageJobService {
+    pub async fn handle_into(
+        &self,
+        request: ImageGenerationParams,
+    ) -> Result<ImageJobStream, SchedulerError> {
+        Ok(self.scheduler.handle_request(request).await?)
+    }
 }

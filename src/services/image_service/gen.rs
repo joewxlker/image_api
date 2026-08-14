@@ -2,11 +2,7 @@ use image::Rgb;
 use std::f32::consts::PI;
 use validator::{Validate, ValidationErrors};
 
-use crate::services::image_service::job::SchedulerClient;
-use crate::{
-    config::{MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH},
-    services::image_service::client::ImageClientError,
-};
+use crate::config::{MAX_IMAGE_HEIGHT, MAX_IMAGE_WIDTH};
 
 fn hash32(mut n: u32) -> u32 {
     n = (n ^ (n >> 15)).wrapping_mul(0x85eb_ca6b);
@@ -345,28 +341,5 @@ impl ImageGenerationParams {
         this.validate()?;
 
         Ok(this)
-    }
-}
-
-#[derive(Clone)]
-pub struct ImageGeneratorService {
-    scheduler: SchedulerClient,
-}
-
-impl ImageGeneratorService {
-    pub fn new(scheduler: SchedulerClient) -> Self {
-        Self { scheduler }
-    }
-}
-
-impl ImageGeneratorService {
-    pub async fn handle_into(
-        &self,
-        request: ImageGenerationParams,
-        transport: tokio::sync::mpsc::Sender<Vec<u8>>,
-    ) -> Result<(), ImageClientError> {
-        self.scheduler.handle_request(request, transport).await?;
-
-        Ok(())
     }
 }

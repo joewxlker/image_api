@@ -11,7 +11,7 @@ use platform::services::image_service::{
     cache::{ImageCacheServiceResult, MmapImageCache},
     client::ImageClient,
     r#gen::ImageGenerationParams,
-    job::Scheduler,
+    job::{JobStatus, Scheduler},
     metrics::ImageMetrics,
 };
 
@@ -54,16 +54,15 @@ async fn run_request(
     client: ImageClient,
     params: ImageGenerationParams,
 ) -> ImageCacheServiceResult {
-    let (transport, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(50);
-
     tokio::task::spawn(async move {
         let mut out = vec![];
+
         while let Some(msg) = receiver.recv().await {
             out.extend_from_slice(&msg);
         }
     });
 
-    client.image_into(params, transport).await.unwrap()
+    client.image_into(params).await.unwrap().0
 }
 
 fn cache_miss(b: &mut Bencher<'_, WallTime>, width: u32, height: u32) {
