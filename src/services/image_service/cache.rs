@@ -68,6 +68,7 @@ impl ImageKey {
 
         Self(format!("{:#x}", hasher.finish()))
     }
+
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -109,6 +110,7 @@ impl MmapImageCache {
     pub fn from_static_path(path: &'static PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
         Self::from_path(path.to_path_buf())
     }
+
     pub fn from_path(path: PathBuf) -> Result<Self, MmapImageCacheFromPathError> {
         if !path.exists() {
             return Err(MmapImageCacheFromPathError::InvalidPath(
@@ -145,8 +147,10 @@ impl MmapImageCache {
 pub enum InvalidPathError {
     #[error("the path `{0}` does not exist")]
     DoesNotExist(PathBuf),
+
     #[error("the path `{0}` is not a directory")]
     NotADirectory(PathBuf),
+
     #[error("the path `{0}` is read-only")]
     ReadOnly(PathBuf),
 }
@@ -201,6 +205,7 @@ impl<T> std::ops::DerefMut for TimedReadResult<T> {
 impl<T> Drop for TimedReadResult<T> {
     fn drop(&mut self) {
         let elapsed = self.started_at.elapsed();
+
         if elapsed > self.grace_duration {
             tracing::warn!(
                 elapsed_ms = elapsed.as_millis(),
@@ -232,6 +237,7 @@ impl MmapImageCache {
 
         Ok(Some(bytes))
     }
+
     pub async fn read_image_metadata(
         &self,
         index: u32,
@@ -247,12 +253,14 @@ impl MmapImageCache {
             None => Ok(ImageMetadata::new(index, key.into_inner(), false)),
         }
     }
+
     async fn read_archived_image<'a>(
         &'a self,
         synchronizer: &'a mut Synchronizer,
         key: &ImageKey,
     ) -> Result<Option<TimedReadResult<ReadResult<'a, ImageCacheItem>>>, MmapImageCacheError> {
         let v = synchronizer.version();
+
         let read = match unsafe { synchronizer.read::<ImageCacheItem>(false) } {
             Ok(read) => {
                 tracing::trace!(
@@ -280,6 +288,7 @@ impl MmapImageCache {
 
         Ok(Some(read))
     }
+
     pub async fn store_image_bytes(
         &self,
         params: ImageGenerationParams,
@@ -289,6 +298,7 @@ impl MmapImageCache {
         let mut synchronizer = Synchronizer::new(self.path.join(key.as_str()).as_os_str());
         let item = ImageCacheItem::new(params.index, params.height, params.width, bytes);
         let grace_duration = *IMAGE_CACHE_GRACE_DURATION;
+
         synchronizer.write::<ImageCacheItem>(&item, grace_duration)?;
 
         Ok(())
@@ -299,6 +309,7 @@ impl MmapImageCache {
 pub enum MmapImageCacheError {
     #[error("Unhandled IO Error: {0}")]
     UnhandledIoError(#[from] std::io::Error),
+
     #[error("SynchronizerError: {0}")]
     SynchronizerError(#[from] SynchronizerError),
 }
@@ -317,7 +328,7 @@ impl ImageCacheService {
 
 impl ImageCacheService {
     #[tracing::instrument(skip(self))]
-    pub async fn handle_into(
+    pub async fn handle(
         &self,
         params: ImageGenerationParams,
     ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
@@ -333,12 +344,13 @@ impl ImageCacheService {
         }
 
         let cache = self.cache.clone();
-        let stream = self.inner.handle_into(params).await?;
+        let stream = self.inner.handle(params).await?;
+
         let request_id = stream.request_id;
 
-        Ok(ImageOutput::Stream(Box::new(
-            ImageCacheStream::new(stream, cache, request_id, params),
-        )))
+        Ok(ImageOutput::Stream(Box::new(ImageCacheStream::new(
+            stream, cache, request_id, params,
+        ))))
     }
 }
 

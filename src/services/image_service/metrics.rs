@@ -13,7 +13,9 @@ use tokio_stream::Stream;
 use tracing::instrument;
 
 use crate::{
-    actions::images::ImageOutput, routes::images::ImageStream, services::image_service::{
+    actions::images::ImageOutput,
+    routes::images::ImageStream,
+    services::image_service::{
         cache::{ImageCacheService, ImageKey},
         client::ImageClientError,
         r#gen::ImageGenerationParams,
@@ -154,14 +156,14 @@ impl ImageMetricsService {
         Self { metrics, inner }
     }
 
-    pub async fn handle_into(
+    pub async fn handle(
         &self,
         params: ImageGenerationParams,
     ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
         let key = ImageKey::from(params);
         let started_at = Instant::now();
 
-        match self.inner.handle_into(params).await {
+        match self.inner.handle(params).await {
             Ok(result) => {
                 self.metrics.resolved(&started_at, params, &key, &result);
 

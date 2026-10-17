@@ -689,17 +689,67 @@ pub enum ProcessError {
     ChannelClosed,
 }
 
+struct WorkQueue {
+    inner: tokio::sync::mpsc::Receiver<Uuid>,
+    render_tx: Sender<Uuid>,
+    store: Arc<JobStore>,
+}
+
+impl WorkQueue {
+    pub fn new(
+        store: &Arc<JobStore>,
+        request_rx: tokio::sync::mpsc::Receiver<Uuid>,
+        render_tx: &Sender<Uuid>,
+    ) -> Self {
+        Self {
+            inner: request_rx,
+            render_tx: render_tx.clone(),
+            store: Arc::clone(store),
+        }
+    }
+
+    fn start(self) -> JoinHandle<()> {
+        tokio::task::spawn(process_queue(self))
+    }
+}
+
+async fn process_queue(queue: WorkQueue) {
+    let mut receiver = queue.inner;
+
+    while let Some(request_id) = receiver.recv().await {
+        let parts = {
+            let job = queue.store.get_mut(&request_id).await.unwrap();
+
+            job.pending_chunks.len()
+        };
+
+        for _ in 0..parts {
+            tracing::debug!(
+                %request_id,
+                "sending render request"
+            );
+
+            if let Err(_) = queue.render_tx.send(request_id).await {
+                queue.store.remove(&request_id).await.unwrap();
+                break;
+            }
+        }
+    }
+}
+
 pub struct Scheduler {
     store: Arc<JobStore>,
-    render_tx: Sender<Uuid>,
+    request_tx: tokio::sync::mpsc::Sender<Uuid>,
+    _queue: tokio::task::JoinHandle<()>,
     _encoders: Vec<tokio::task::JoinHandle<()>>,
     _renderers: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl Scheduler {
     pub fn new(encoders: usize, renderers: usize) -> Self {
-        let (encode_tx, encode_rx) = async_channel::bounded(200);
-        let (render_tx, render_rx) = async_channel::bounded(200);
+        let (encode_tx, encode_rx) = async_channel::bounded(16);
+        let (render_tx, render_rx) = async_channel::bounded(16);
+        let (request_tx, request_rx) = tokio::sync::mpsc::channel(64);
         let store = Arc::new(JobStore::new());
 
         Self {
@@ -709,16 +759,39 @@ impl Scheduler {
             _renderers: (0..renderers)
                 .map(|_| RenderWorker::new(&store, &render_rx, &encode_tx).start())
                 .collect(),
+            _queue: WorkQueue::new(&store, request_rx, &render_tx).start(),
+            request_tx,
             store,
-            render_tx,
         }
     }
+
     pub fn get_client(&self) -> SchedulerClient {
         SchedulerClient {
             store: self.store.clone(),
-            render_tx: self.render_tx.clone(),
+            request_tx: self.request_tx.clone(),
         }
     }
+}
+
+impl From<tokio::sync::mpsc::error::TrySendError<Uuid>> for SchedulerError {
+    fn from(value: tokio::sync::mpsc::error::TrySendError<Uuid>) -> Self {
+        match value {
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => SchedulerError::ChannelClosed,
+            tokio::sync::mpsc::error::TrySendError::Full(_) => SchedulerError::TooManyRequests,
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum SchedulerError {
+    #[error("JobStoreError: {0}")]
+    JobStoreError(#[from] JobStoreError),
+
+    #[error("Too many requests")]
+    TooManyRequests,
+
+    #[error("Channel closed")]
+    ChannelClosed,
 }
 
 const MIN_CHUNK: u32 = 500;
@@ -726,7 +799,7 @@ const MIN_CHUNK: u32 = 500;
 #[derive(Clone)]
 pub struct SchedulerClient {
     store: Arc<JobStore>,
-    render_tx: Sender<Uuid>,
+    request_tx: tokio::sync::mpsc::Sender<Uuid>,
 }
 
 impl SchedulerClient {
@@ -746,50 +819,18 @@ impl SchedulerClient {
             (request.height / MIN_CHUNK).max(1),
         );
 
-        let parts = chunks.len();
         let params = RenderParams::from(request);
         let job = ImageJob::new(request_id, chunks, params, cancel_token, transport);
 
         self.store.insert(request_id, job).await?;
 
-        for _ in 0..parts {
-            tracing::debug!(
-                %request_id,
-                "sending render request"
-            );
-
-            if let Err(_) = self.render_tx.send(request_id).await {
-                self.store.remove(&request_id).await?;
-
-                return Err(SchedulerError::ChannelClosed);
-            }
+        if let Err(err) = self.request_tx.try_send(request_id) {
+            self.store.remove(&request_id).await?;
+            return Err(err.into());
         }
 
         Ok(ImageJobStream::new(&request_id, transport_rx, drop_guard))
     }
-}
-
-// impl From<async_channel::TrySendError<Uuid>> for SchedulerError {
-//     fn from(value: async_channel::TrySendError<Uuid>) -> Self {
-//         match value {
-//             async_channel::TrySendError::Closed(_) => {
-//                 return SchedulerError::ChannelClosed;
-//             }
-//             async_channel::TrySendError::Full(_) => {
-//                 return SchedulerError::TooManyRequests;
-//             }
-//         }
-//     }
-// }
-
-#[derive(thiserror::Error, Debug)]
-pub enum SchedulerError {
-    #[error("JobStoreError: {0}")]
-    JobStoreError(#[from] JobStoreError),
-    // #[error("Too many requests")]
-    // TooManyRequests,
-    #[error("Channel closed")]
-    ChannelClosed,
 }
 
 pub struct ImageJobStream {
@@ -843,7 +884,7 @@ impl ImageJobService {
 }
 
 impl ImageJobService {
-    pub async fn handle_into(
+    pub async fn handle(
         &self,
         request: ImageGenerationParams,
     ) -> Result<ImageJobStream, SchedulerError> {

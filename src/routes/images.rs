@@ -14,7 +14,7 @@ use tokio_stream::Stream;
 use tracing::instrument;
 use validator::ValidationErrors;
 
-use crate::actions::images::{ImageOutput, stream_image};
+use crate::actions::images::ImageOutput;
 use crate::services::image_service::{
     cache::{ImageMetadata, MmapImageCacheError},
     client::{ImageClient, ImageClientError},
@@ -30,9 +30,9 @@ pub async fn get_image<'a>(
     bypass_cache_read: Option<bool>,
     image_client: &State<ImageClient>,
 ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageRouteError> {
-    let params = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
+    let req = ImageGenerationParams::build(index, width, height, bypass_cache_read)?;
     let image_client = image_client.inner().clone();
-    let image_streaming = stream_image(params, image_client).await?;
+    let image_streaming = image_client.image(req).await?;
 
     Ok(image_streaming)
 }

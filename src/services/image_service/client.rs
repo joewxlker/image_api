@@ -1,11 +1,10 @@
 use tower::{Layer, ServiceBuilder};
 
 use crate::{
-    actions::images::ImageOutput, routes::images::ImageStream, services::image_service::{
-        cache::{
-            ImageCacheService, ImageMetadata, MmapImageCache,
-            MmapImageCacheError,
-        },
+    actions::images::ImageOutput,
+    routes::images::ImageStream,
+    services::image_service::{
+        cache::{ImageCacheService, ImageMetadata, MmapImageCache, MmapImageCacheError},
         r#gen::ImageGenerationParams,
         job::{ImageJobService, SchedulerClient, SchedulerError},
         metrics::{ImageMetrics, ImageMetricsService},
@@ -43,11 +42,11 @@ impl ImageClient {
         Ok(result)
     }
 
-    pub async fn image_into(
+    pub async fn image(
         &self,
         params: ImageGenerationParams,
     ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
-        self.inner.handle_into(params).await
+        self.inner.handle(params).await
     }
 }
 

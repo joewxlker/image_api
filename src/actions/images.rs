@@ -29,8 +29,8 @@ impl<S: ImageStream> ImageOutput<S> {
 }
 
 pub async fn stream_image(
-    params: ImageGenerationParams,
+    req: ImageGenerationParams,
     image_client: ImageClient,
 ) -> Result<ImageOutput<impl ImageStream + use<>>, ImageClientError> {
-    image_client.image_into(params).await
+    image_client.image(req).await
 }
